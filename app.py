@@ -32,12 +32,12 @@ st.write(
 FEATURE_COLUMNS = [
     'IRRADIATION(W/m²)',
     'AMBIENT_TEMPERATURE(°C)',
-    'MODULE_TEMPERATURE(°C)',
+    'ACTUAL_MODULE_TEMPERATURE(°C)',
     'hour',
     'month',
     'dayofyear',
 ]
-TARGET_COLUMN = 'DC_POWER(kW)'
+TARGET_COLUMN = 'ACTUAL_DC_POWER(kW)'
 
 
 @st.cache_data
@@ -107,7 +107,7 @@ def make_prediction_frame(date_value, time_value, irradiation, ambient_temp, mod
         {
             'IRRADIATION(W/m²)': [irradiation],
             'AMBIENT_TEMPERATURE(°C)': [ambient_temp],
-            'MODULE_TEMPERATURE(°C)': [module_temp],
+            'ACTUAL_MODULE_TEMPERATURE(°C)': [module_temp],
             'hour': [timestamp.hour + (timestamp.minute / 60.0)],
             'month': [timestamp.month],
             'dayofyear': [timestamp.dayofyear],
