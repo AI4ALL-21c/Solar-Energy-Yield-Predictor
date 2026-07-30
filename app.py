@@ -7,6 +7,7 @@ import streamlit as st
 
 from constants import PLANT_CAPACITY_KWP
 from pipeline_functions import (
+    PLANT_LATITUDE_DEG,
     build_feature_row,
     build_time_features,
     calculate_ac_power_per_kwp,
@@ -103,6 +104,20 @@ with left:
 
     st.subheader('Make a Prediction')
     with st.form('prediction_form'):
+        location_name = st.text_input('Location', value='Training plant (Puducherry, India)')
+        location_lat = st.number_input(
+            'Location latitude (°)',
+            min_value=-90.0,
+            max_value=90.0,
+            value=PLANT_LATITUDE_DEG,
+            step=0.5,
+            help="No geocoding is available, so latitude is entered directly. It's compared "
+                 "against the training plant's latitude to flag predictions far from where the "
+                 'model was trained.',
+        )
+        system_capacity_kwp = st.number_input(
+            'System capacity (kWp)', min_value=1.0, value=float(PLANT_CAPACITY_KWP), step=100.0
+        )
         date_value = st.date_input('Date', value=pd.Timestamp(df['DATE_TIME'].iloc[-1]).date())
         time_value = st.time_input('Time', value=pd.Timestamp(df['DATE_TIME'].iloc[-1]).time())
         irradiation = st.number_input('Irradiation (W/m²)', min_value=0.0, value=800.0, step=10.0)
@@ -122,20 +137,20 @@ with left:
 
         feature_row = build_feature_row(irradiation, ambient_temp, wind_speed, cloud_cover, hour, day_of_year)
         combined_kw, predicted_gap = predict_combined_ac_kw(
-            model, feature_row, [irradiation], [theoretical_ac_per_kwp], PLANT_CAPACITY_KWP
+            model, feature_row, [irradiation], [theoretical_ac_per_kwp], system_capacity_kwp
         )
-        st.success(f'Estimated AC power: {combined_kw[0]:.2f} kW')
+        st.success(f'Estimated AC power for {location_name}: {combined_kw[0]:.2f} kW')
         st.caption(
-            f'Theoretical baseline: {theoretical_ac_per_kwp * PLANT_CAPACITY_KWP:.2f} kW, '
+            f'Theoretical baseline: {theoretical_ac_per_kwp * system_capacity_kwp:.2f} kW, '
             f'model-predicted gap: {predicted_gap[0]:+.4f} per kWp, '
             f'estimated module temperature: {module_temp:.1f} °C'
         )
 
-        out_of_range, reasons = check_out_of_range(lat=8.85, requested_months={timestamp.month})
+        out_of_range, reasons = check_out_of_range(lat=location_lat, requested_months={timestamp.month})
         if out_of_range:
             st.warning(
-                'This input falls outside the training conditions, so treat the estimate with caution: '
-                + '; '.join(reasons)
+                'This request falls outside what the model was trained on, so treat the '
+                'estimate with caution: ' + '; '.join(reasons)
             )
 
         st.dataframe(feature_row, width='stretch')
@@ -143,6 +158,11 @@ with left:
 with right:
     st.subheader('Quick Check on Holdout Data')
     st.line_chart(test_preview.head(200), x='Actual', y='Predicted')
+    st.caption(
+        'Each point compares the model\'s predicted AC power against the actual recorded '
+        'power for data the model did not train on. The closer the points track a straight '
+        'diagonal (predicted = actual), the more accurate the model is.'
+    )
     st.dataframe(test_preview.head(10), width='stretch')
 
 st.divider()
@@ -156,6 +176,11 @@ if hasattr(model, 'feature_importances_'):
         }
     ).sort_values('Importance', ascending=False)
     st.bar_chart(importance_df.set_index('Feature'))
+    st.caption(
+        "How much each input drives the model's prediction of the gap between theoretical "
+        'and actual output. Taller bars mean the model leans on that feature more heavily; '
+        "it doesn't say whether the effect is positive or negative, only how much it matters."
+    )
 else:
     st.info('Feature importance is not available for this estimator.')
 
