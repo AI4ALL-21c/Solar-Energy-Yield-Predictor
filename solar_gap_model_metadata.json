@@ -9,16 +9,17 @@
     "DAY_OF_YEAR_SIN",
     "DAY_OF_YEAR_COS"
   ],
-  "implied_capacity_kwp": 20230.175625332173,
+  "capacity_kwp": 25545,
+  "training_file": "solar_plant_data_cleaned.csv",
   "target_column": "TARGET_GAP_PER_KWP",
   "combination_rule": "combined_ac_per_kwp = max(THEORETICAL_AC_PER_KWP + predicted_gap, 0); forced to 0 whenever IRRADIATION(W/m\u00b2) <= 0 (midnight override); combined_ac_kw = combined_ac_per_kwp * capacity_kwp",
   "training_window": "May 15 - Jun 17 2020, single plant, single region (monsoon season)",
-  "holdout_test_rmse_gap_per_kwp": 0.0510851165448954,
-  "holdout_test_mae_gap_per_kwp": 0.020682193142165958,
-  "holdout_test_r2_gap_per_kwp": 0.7986380201873111,
-  "cv_rmse_mean_gap_per_kwp": 0.05964171505382454,
-  "cv_rmse_std_gap_per_kwp": 0.009307116113294935,
-  "backtest_rmse_kw": 1032.1524040606155,
-  "backtest_mae_kw": 396.1309157300729,
-  "backtest_r2_kw": 0.974234031923444
+  "holdout_test_rmse_gap_per_kwp": 0.04877209598258957,
+  "holdout_test_mae_gap_per_kwp": 0.017740885376802133,
+  "holdout_test_r2_gap_per_kwp": 0.7909966744594432,
+  "cv_rmse_mean_gap_per_kwp": 0.046641364768028826,
+  "cv_rmse_std_gap_per_kwp": 0.0013745145156487464,
+  "backtest_rmse_kw": 1245.1992922772267,
+  "backtest_mae_kw": 431.8431717734597,
+  "backtest_r2_kw": 0.9606752124383608
 }

@@ -3,10 +3,15 @@
 ## Overview
 This project predicts solar DC power from weather and time inputs. The notebook evaluation favored **XGBoost** as the final model because it outperformed the baseline models.
 
-## Evaluation Summary
-- **Linear Regression:** R² ≈ 0.6957, RMSE ≈ 3340.30 kW
-- **Random Forest:** R² ≈ 0.7945, RMSE ≈ 2745.00 kW
-- **XGBoost:** R² ≈ 0.9628, MAE ≈ 496.15 kW
+## Official Model Metrics
+
+These are the official metrics for the retrained XGBoost gap model using `solar_plant_data_cleaned.csv`.
+
+| Evaluation | RMSE | MAE | R² |
+|---|---:|---:|---:|
+| 80/20 Holdout | 0.0488 gap/kWp | 0.0177 gap/kWp | 0.7910 |
+| 5-Fold Cross-Validation | 0.0466 ± 0.0014 gap/kWp | — | — |
+| AC Power Backtest | 1245.20 kW | 431.84 kW | 0.9607 |
 
 ## Streamlit App
 Run the interactive app with:
