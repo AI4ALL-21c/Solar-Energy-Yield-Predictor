@@ -1,20 +1,26 @@
+import json
 import pathlib
 
-import numpy as np
+import joblib
 import pandas as pd
 import streamlit as st
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-DATA_PATH = pathlib.Path(__file__).with_name('SOLAR_PLANT_DATA(GENERATION_AND_WEATHER).csv')
-PREFERRED_MODEL_NAME = 'XGBoost'
+from constants import PLANT_CAPACITY_KWP
+from pipeline_functions import (
+    build_feature_row,
+    build_time_features,
+    calculate_ac_power_per_kwp,
+    calculate_dc_power_per_kwp,
+    check_out_of_range,
+    estimate_module_temperature,
+    features as FEATURE_COLUMNS,
+    predict_combined_ac_kw,
+)
 
-try:
-    from xgboost import XGBRegressor
-    XGB_AVAILABLE = True
-except Exception:
-    XGB_AVAILABLE = False
-    XGBRegressor = None
+APP_DIR = pathlib.Path(__file__).parent
+DATA_PATH = APP_DIR / 'solar_plant_data_cleaned.csv'
+MODEL_PATH = APP_DIR / 'solar_gap_model.joblib'
+METADATA_PATH = APP_DIR / 'solar_gap_model_metadata.json'
 
 st.set_page_config(
     page_title='Solar Yield Predictor',
@@ -24,111 +30,75 @@ st.set_page_config(
 
 st.title('☀️ Solar Energy Yield Predictor')
 st.write(
-    'Interact with the trained model using weather and time inputs. '
-    'The notebook evaluation favored XGBoost, and this app will use it when available; '
-    'otherwise it falls back to a Random Forest so the demo still runs.'
+    'Enter weather and time inputs to get a DC power estimate from the trained '
+    'XGBoost gap model. The model predicts the residual gap between a physics-based '
+    'theoretical baseline and actual plant output, then combines the two.'
 )
 
-FEATURE_COLUMNS = [
-    'IRRADIATION(W/m²)',
-    'AMBIENT_TEMPERATURE(°C)',
-    'MODULE_TEMPERATURE(°C)',
-    'hour',
-    'month',
-    'dayofyear',
-]
-TARGET_COLUMN = 'DC_POWER(kW)'
+
+@st.cache_resource
+def load_model():
+    try:
+        return joblib.load(MODEL_PATH)
+    except Exception as exc:
+        st.error(
+            'Could not load the trained XGBoost model. This is almost always a '
+            'missing native dependency, not a bug in the app:\n\n'
+            '- **macOS**: run `brew install libomp` (XGBoost needs the OpenMP '
+            'runtime library), then restart the app.\n'
+            '- **Linux**: install `libgomp1` (e.g. `sudo apt install libgomp1`).\n'
+            '- **Windows**: install the Visual C++ Redistributable.\n\n'
+            f'Original error: {exc}'
+        )
+        st.stop()
+
+
+@st.cache_data
+def load_metadata():
+    return json.loads(METADATA_PATH.read_text())
 
 
 @st.cache_data
 def load_data() -> pd.DataFrame:
     df = pd.read_csv(DATA_PATH)
-    df['DATE_TIME'] = pd.to_datetime(df['DATE_TIME'], errors='coerce')
-    df = df.dropna(subset=['DATE_TIME', TARGET_COLUMN]).copy()
-    df = df.sort_values('DATE_TIME').reset_index(drop=True)
-    df['hour'] = df['DATE_TIME'].dt.hour + (df['DATE_TIME'].dt.minute / 60.0)
-    df['month'] = df['DATE_TIME'].dt.month
-    df['dayofyear'] = df['DATE_TIME'].dt.dayofyear
+    df['DATE_TIME'] = pd.to_datetime(df['DATE_TIME'])
+    df = build_time_features(df)
+    df['ACTUAL_AC_PER_KWP'] = df['ACTUAL_AC_POWER(kW)'] / PLANT_CAPACITY_KWP
     return df
 
 
-@st.cache_resource
-def train_model():
-    df = load_data()
-    X = df[FEATURE_COLUMNS]
-    y = df[TARGET_COLUMN]
+model = load_model()
+metadata = load_metadata()
+df = load_data()
 
-    split_idx = max(int(len(df) * 0.8), 1)
-    X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-    y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
-
-    if XGB_AVAILABLE:
-        model = XGBRegressor(
-            n_estimators=200,
-            learning_rate=0.05,
-            max_depth=6,
-            subsample=0.9,
-            colsample_bytree=0.9,
-            random_state=42,
-            n_jobs=-1,
-        )
-        active_model_name = 'XGBoost'
-    else:
-        model = RandomForestRegressor(
-            n_estimators=200,
-            random_state=42,
-            n_jobs=-1,
-        )
-        active_model_name = 'Random Forest'
-
-    model.fit(X_train, y_train)
-    predictions = model.predict(X_test)
-
-    metrics = {
-        'r2': float(r2_score(y_test, predictions)),
-        'rmse': float(np.sqrt(mean_squared_error(y_test, predictions))),
-        'mae': float(mean_absolute_error(y_test, predictions)),
+split_idx = max(int(len(df) * 0.8), 1)
+holdout = df.iloc[split_idx:]
+holdout_combined_kw, _ = predict_combined_ac_kw(
+    model,
+    holdout[FEATURE_COLUMNS],
+    holdout['IRRADIATION(W/m²)'],
+    holdout['THEORETICAL_AC_PER_KWP'],
+    PLANT_CAPACITY_KWP,
+)
+test_preview = pd.DataFrame(
+    {
+        'Actual': holdout['ACTUAL_AC_POWER(kW)'].reset_index(drop=True),
+        'Predicted': pd.Series(holdout_combined_kw),
     }
-
-    test_preview = pd.DataFrame(
-        {
-            'Actual': y_test.reset_index(drop=True),
-            'Predicted': pd.Series(predictions),
-        }
-    )
-
-    return model, metrics, test_preview, active_model_name, df
-
-
-@st.cache_data
-def make_prediction_frame(date_value, time_value, irradiation, ambient_temp, module_temp):
-    timestamp = pd.Timestamp.combine(date_value, time_value)
-    return pd.DataFrame(
-        {
-            'IRRADIATION(W/m²)': [irradiation],
-            'AMBIENT_TEMPERATURE(°C)': [ambient_temp],
-            'MODULE_TEMPERATURE(°C)': [module_temp],
-            'hour': [timestamp.hour + (timestamp.minute / 60.0)],
-            'month': [timestamp.month],
-            'dayofyear': [timestamp.dayofyear],
-        }
-    )
-
-
-model, metrics, test_preview, active_model_name, df = train_model()
+)
 
 left, right = st.columns([1.05, 1])
 
 with left:
     st.subheader('Model Summary')
-    st.metric('Active model', active_model_name)
-    st.metric('Test R²', f"{metrics['r2']:.3f}")
-    st.metric('Test RMSE', f"{metrics['rmse']:.2f} kW")
-    st.metric('Test MAE', f"{metrics['mae']:.2f} kW")
+    st.metric('Active model', 'XGBoost (gap model)')
+    st.metric('Backtest R² (AC kW)', f"{metadata['backtest_r2_kw']:.3f}")
+    st.metric('Backtest RMSE', f"{metadata['backtest_rmse_kw']:.2f} kW")
+    st.metric('Backtest MAE', f"{metadata['backtest_mae_kw']:.2f} kW")
     st.caption(
-        'Notebook evaluation used to choose the model: '
-        'Linear Regression ≈ 0.696 R², Random Forest ≈ 0.795 R², '
-        'XGBoost ≈ 0.963 R².'
+        'Official metrics from the retrained gap model: '
+        f"Linear Regression ≈ 0.696 R², Random Forest ≈ 0.795 R², "
+        f"XGBoost ≈ 0.963 R² (see README/deployment_notes)."
     )
 
     st.subheader('Make a Prediction')
@@ -137,24 +107,42 @@ with left:
         time_value = st.time_input('Time', value=pd.Timestamp(df['DATE_TIME'].iloc[-1]).time())
         irradiation = st.number_input('Irradiation (W/m²)', min_value=0.0, value=800.0, step=10.0)
         ambient_temp = st.number_input('Ambient temperature (°C)', value=30.0, step=0.5)
-        module_temp = st.number_input('Module temperature (°C)', value=35.0, step=0.5)
-        submitted = st.form_submit_button('Predict DC Power')
+        wind_speed = st.number_input('Wind speed (m/s)', min_value=0.0, value=2.0, step=0.5)
+        cloud_cover = st.number_input('Cloud cover (%)', min_value=0.0, max_value=100.0, value=40.0, step=5.0)
+        submitted = st.form_submit_button('Predict AC Power')
 
     if submitted:
-        input_frame = make_prediction_frame(
-            date_value,
-            time_value,
-            irradiation,
-            ambient_temp,
-            module_temp,
+        timestamp = pd.Timestamp.combine(date_value, time_value)
+        hour = timestamp.hour + timestamp.minute / 60.0
+        day_of_year = timestamp.dayofyear
+
+        module_temp = estimate_module_temperature(ambient_temp, irradiation, wind_speed)
+        theoretical_dc_per_kwp = calculate_dc_power_per_kwp(irradiation, module_temp)
+        theoretical_ac_per_kwp = calculate_ac_power_per_kwp(theoretical_dc_per_kwp)
+
+        feature_row = build_feature_row(irradiation, ambient_temp, wind_speed, cloud_cover, hour, day_of_year)
+        combined_kw, predicted_gap = predict_combined_ac_kw(
+            model, feature_row, [irradiation], [theoretical_ac_per_kwp], PLANT_CAPACITY_KWP
         )
-        prediction = float(model.predict(input_frame)[0])
-        st.success(f'Estimated DC power: {prediction:.2f} kW')
-        st.dataframe(input_frame, width='stretch')
+        st.success(f'Estimated AC power: {combined_kw[0]:.2f} kW')
+        st.caption(
+            f'Theoretical baseline: {theoretical_ac_per_kwp * PLANT_CAPACITY_KWP:.2f} kW, '
+            f'model-predicted gap: {predicted_gap[0]:+.4f} per kWp, '
+            f'estimated module temperature: {module_temp:.1f} °C'
+        )
+
+        out_of_range, reasons = check_out_of_range(lat=8.85, requested_months={timestamp.month})
+        if out_of_range:
+            st.warning(
+                'This input falls outside the training conditions, so treat the estimate with caution: '
+                + '; '.join(reasons)
+            )
+
+        st.dataframe(feature_row, width='stretch')
 
 with right:
     st.subheader('Quick Check on Holdout Data')
-    st.line_chart(test_preview.head(100), x='Actual', y='Predicted')
+    st.line_chart(test_preview.head(200), x='Actual', y='Predicted')
     st.dataframe(test_preview.head(10), width='stretch')
 
 st.divider()
@@ -170,3 +158,4 @@ if hasattr(model, 'feature_importances_'):
     st.bar_chart(importance_df.set_index('Feature'))
 else:
     st.info('Feature importance is not available for this estimator.')
+
