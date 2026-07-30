@@ -130,9 +130,11 @@ class TestPhysicsFunctions:
         assert cooler > hotter
 
     # validates thermal gain, cold panels operate above rated efficiency
+    # uses irradiance below 1000 so the comparison isn't capped by the new 1.0 ceiling
     def test_cooler_than_stc_gives_a_efficiency_bonus(self):
-        below_stc = calculate_dc_power_per_kwp(1000.0, module_temp_c=15.0)
-        assert below_stc > 1.0
+        at_stc_temp = calculate_dc_power_per_kwp(700.0, module_temp_c=25.0)
+        below_stc_temp = calculate_dc_power_per_kwp(700.0, module_temp_c=15.0)
+        assert below_stc_temp > at_stc_temp
 
     # checks conversion efficiency from dc to ac power
     def test_ac_power_applies_inverter_efficiency(self):
@@ -182,13 +184,22 @@ class TestExtremeClimates:
         dc = calculate_dc_power_per_kwp(1000.0, mod_temp)
         assert 0.0 <= dc < 1.0  # reduced output due to heat, but not negative or invalid
 
-    def test_KNOWN_LIMITATION_extreme_cold_can_exceed_rated_capacity(self):
-        """Known issue: extreme cold and bright sun can cause predictions over 100% capacity because the formula has no cap. This test logs the output until a cap is added."""
+    # confirms extreme cold no longer exceeds 100% capacity now that the cap is added
+    def test_extreme_cold_is_now_capped_at_rated_capacity(self):
         mod_temp = estimate_module_temperature(ambient_temp_c=-30.0, irradiance_wm2=900.0, wind_speed_ms=2.0)
         dc = calculate_dc_power_per_kwp(900.0, mod_temp)
-        print(f"\n[KNOWN LIMITATION] -30C/900W/m^2 -> DC_per_kWp={dc:.4f} "
-              f"({'EXCEEDS' if dc > 1.0 else 'within'} rated capacity, no cap enforced)")
-        assert dc > 0  # sanity check: output remains positive without crashing, but not capped at 1.0.
+        assert dc == pytest.approx(1.0)
+
+    # confirms the new cap doesn't change output under ordinary, non-extreme conditions
+    def test_cap_does_not_affect_ordinary_non_extreme_conditions(self):
+        mod_temp = estimate_module_temperature(ambient_temp_c=28.0, irradiance_wm2=600.0, wind_speed_ms=2.5)
+        dc = calculate_dc_power_per_kwp(600.0, mod_temp)
+        assert dc == pytest.approx(0.5586, abs=0.001)
+
+    # confirms irradiance readings slightly above 1000 W/m^2 also get capped at 1.0
+    def test_irradiance_above_stc_is_also_capped(self):
+        dc = calculate_dc_power_per_kwp(1050.0, module_temp_c=25.0)
+        assert dc == pytest.approx(1.0)
 
     def test_antarctic_research_station_latitude_flags_out_of_range(self):
         mcmurdo_lat = -77.85
