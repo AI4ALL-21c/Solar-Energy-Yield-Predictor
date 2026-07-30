@@ -13,12 +13,12 @@
   "target_column": "TARGET_GAP_PER_KWP",
   "combination_rule": "combined_ac_per_kwp = max(THEORETICAL_AC_PER_KWP + predicted_gap, 0); forced to 0 whenever IRRADIATION(W/m\u00b2) <= 0 (midnight override); combined_ac_kw = combined_ac_per_kwp * capacity_kwp",
   "training_window": "May 15 - Jun 17 2020, single plant, single region (monsoon season)",
-  "holdout_test_rmse_gap_per_kwp": 0.04920864455300208,
-  "holdout_test_mae_gap_per_kwp": 0.02064737195563109,
-  "holdout_test_r2_gap_per_kwp": 0.8131592935180025,
-  "cv_rmse_mean_gap_per_kwp": 0.059295132826113386,
-  "cv_rmse_std_gap_per_kwp": 0.009033002540117602,
-  "backtest_rmse_kw": 994.4423620570526,
-  "backtest_mae_kw": 393.91853639955076,
-  "backtest_r2_kw": 0.9760823756607444
+  "holdout_test_rmse_gap_per_kwp": 0.0510851165448954,
+  "holdout_test_mae_gap_per_kwp": 0.020682193142165958,
+  "holdout_test_r2_gap_per_kwp": 0.7986380201873111,
+  "cv_rmse_mean_gap_per_kwp": 0.05964171505382454,
+  "cv_rmse_std_gap_per_kwp": 0.009307116113294935,
+  "backtest_rmse_kw": 1032.1524040606155,
+  "backtest_mae_kw": 396.1309157300729,
+  "backtest_r2_kw": 0.974234031923444
 }
