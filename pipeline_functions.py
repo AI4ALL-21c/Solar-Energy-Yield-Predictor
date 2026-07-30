@@ -39,7 +39,8 @@ def calculate_dc_power_per_kwp(irradiance_wm2, module_temp_c, temp_coefficient=D
         return 0.0
     irradiance_ratio = irradiance_wm2 / STC_IRRADIANCE
     temp_adjustment = 1 + temp_coefficient * (module_temp_c - STC_TEMP)
-    return max(irradiance_ratio * temp_adjustment, 0.0)
+    raw = irradiance_ratio * temp_adjustment
+    return float(np.clip(raw, 0.0, 1.0))
 
 
 def calculate_ac_power_per_kwp(dc_power_per_kwp, inverter_efficiency=DEFAULT_INVERTER_EFF):
