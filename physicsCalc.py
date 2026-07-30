@@ -1,8 +1,7 @@
 import pandas as pd
 import numpy as np
 
-solar_data = pd.read_csv('SOLAR_PLANT_DATA(GENERATION_AND_WEATHER).csv')  # or your latest saved CSV
-solar_data['DATE_TIME'] = pd.to_datetime(solar_data['DATE_TIME'])
+
 
 IRRADIATION_COL = 'IRRADIATION(W/m²)'  # confirm against solar_data.columns if unsure
 
@@ -16,7 +15,7 @@ DEFAULT_MODULE_EFFICIENCY = 0.18  # used to back out an assumed capacity from ar
 
 
 def estimate_module_temperature(ambient_temp_c, irradiance_wm2, wind_speed_ms=None, noct=DEFAULT_NOCT):
-    if wind_speed_ms is not None and not pd.isna(wind_speed_ms):
+    if wind_speed_ms is not None:
         u0, u1 = 25.0, 6.84
         delta_t = irradiance_wm2 / (u0 + u1 * wind_speed_ms)
     else:
@@ -25,11 +24,15 @@ def estimate_module_temperature(ambient_temp_c, irradiance_wm2, wind_speed_ms=No
 
 
 def calculate_dc_power_per_kwp(irradiance_wm2, module_temp_c, temp_coefficient=DEFAULT_TEMP_COEFF):
-    if irradiance_wm2 <= 0:
-        return 0.0
     irradiance_ratio = irradiance_wm2 / STC_IRRADIANCE
     temp_adjustment = 1 + temp_coefficient * (module_temp_c - STC_TEMP)
-    return max(irradiance_ratio * temp_adjustment, 0.0)
+    power = irradiance_ratio * temp_adjustment
+
+    return np.where(
+        irradiance_wm2 <= 0,
+        0.0,
+        np.maximum(power, 0.0)
+    )
 
 
 def calculate_ac_power_per_kwp(dc_power_per_kwp, inverter_efficiency=DEFAULT_INVERTER_EFF):
@@ -64,17 +67,28 @@ def calculate_theoretical_system_outputs(
     ac_per_kwp = calculate_ac_power_per_kwp(dc_per_kwp, inv_eff)
     
     # 4. Calculate Target Capacity scale using Area (m²) and efficiency
-    if effective_area_m2 is not None and not pd.isna(effective_area_m2):
-        target_capacity_kwp = effective_area_m2 * mod_eff
+    if effective_area_m2 is not None:
+        target_capacity_kwp = np.where(
+        pd.isna(effective_area_m2),
+        1.0,
+        effective_area_m2 * mod_eff
+    )
     else:
-        target_capacity_kwp = 1.0  # Assumes a simple 1 kWp system baseline if no area provided
-        
-    # 5. Scale performance ratios to Absolute Power (kW)
+         target_capacity_kwp = 1.0
+
+
     absolute_dc_power_kw = dc_per_kwp * target_capacity_kwp
     absolute_ac_power_kw = absolute_dc_power_kw * inv_eff
-    
-    return mod_temp, dc_per_kwp, ac_per_kwp, target_capacity_kwp, absolute_dc_power_kw, absolute_ac_power_kw
 
+    return (
+        mod_temp,
+        dc_per_kwp,
+        ac_per_kwp,
+        target_capacity_kwp,
+        absolute_dc_power_kw,
+        absolute_ac_power_kw
+    )
+         
 
 # ---- Simple Tester Block ----
 if __name__ == "__main__":
