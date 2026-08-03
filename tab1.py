@@ -1,0 +1,213 @@
+import calendar
+from datetime import date, timedelta
+
+import pandas as pd
+import streamlit as st
+import plotly.express as px
+import plotly.graph_objects as go
+
+import physicsutil as pu
+import modelutil as mu
+import weatherapi as wa
+
+SEASON_MONTHS = {
+    "Spring (Mar-May)": (3, 5),
+    "Summer (Jun-Aug)": (6, 8),
+    "Fall (Sep-Nov)": (9, 11),
+    "Winter (Dec-Feb)": (12, 2),
+}
+
+
+def month_range(month_idx, year):
+    start = date(year, month_idx, 1)
+    end = date(year, month_idx, calendar.monthrange(year, month_idx)[1])
+    return start, end
+
+
+def season_range(label, year):
+    start_month, end_month = SEASON_MONTHS[label]
+    start = date(year, start_month, 1)
+    if end_month < start_month:
+        end = date(year + 1, end_month, calendar.monthrange(year + 1, end_month)[1])
+    else:
+        end = date(year, end_month, calendar.monthrange(year, end_month)[1])
+    return start, end
+
+
+def roll_to_future(start, end):
+    while end < date.today():
+        try:
+            start = start.replace(year=start.year + 1)
+        except ValueError:
+            start = start.replace(year=start.year + 1, day=28)
+        try:
+            end = end.replace(year=end.year + 1)
+        except ValueError:
+            end = end.replace(year=end.year + 1, day=28)
+    return start, end
+
+
+def render(model, metadata):
+    st.header("Forecast")
+    st.caption("Estimate expected generation for an upcoming period, based on historical weather patterns.")
+
+    features = mu.get_features(metadata)
+    this_year = date.today().year
+
+    col1, col2 = st.columns(2)
+    with col1:
+        capacity_kwp = st.number_input("Plant Capacity (kWp)", min_value=0.01, value=100.0, step=1.0, key="t1_capacity")
+        location = st.text_input("Location", placeholder="e.g. Chennai, India", key="t1_location")
+    with col2:
+        mode = st.radio("Pick period by", ["Month", "Season", "Specific Date", "Date Range"], horizontal=True, key="t1_mode")
+
+    if mode == "Month":
+        month_name = st.selectbox("Month", list(calendar.month_name)[1:], key="t1_month")
+        month_idx = list(calendar.month_name).index(month_name)
+        start, end = month_range(month_idx, this_year)
+        start, end = roll_to_future(start, end)
+    elif mode == "Season":
+        season = st.selectbox("Season", list(SEASON_MONTHS.keys()), key="t1_season")
+        start, end = season_range(season, this_year)
+        start, end = roll_to_future(start, end)
+    elif mode == "Specific Date":
+        d = st.date_input("Date", value=date.today() + timedelta(days=1), min_value=date.today(), key="t1_date")
+        start, end = d, d
+    else:
+        picked = st.date_input("Date Range",
+                                value=(date.today() + timedelta(days=1), date.today() + timedelta(days=7)),
+                                min_value=date.today(), key="t1_daterange")
+        if isinstance(picked, tuple) and len(picked) == 2:
+            start, end = picked
+        else:
+            st.info("Pick a start and end date.")
+            return
+
+    st.caption(f"Forecasting **{start} to {end}** ({(end - start).days + 1} day window), "
+               f"projected from up to 10 years of historical weather for this same calendar period.")
+
+    run = st.button("Run Forecast", use_container_width=True, key="t1_run")
+    if not run:
+        return
+    if not location.strip():
+        st.error("Location is required.")
+        return
+    if model is None:
+        st.warning("Model file not found, showing physics-only results.")
+
+    lat, lon, name, tz = wa.geocode(location)
+    tilt, azimuth = wa.default_tilt_azimuth(lat)
+    st.caption(f"Using {name} (lat {lat:.2f}, lon {lon:.2f})")
+
+    with st.spinner("Fetching historical weather..."):
+        by_year = wa.fetch_years(lat, lon, tilt, azimuth, start, end, years_back=10, tz=tz)
+
+    if not by_year:
+        st.error("No historical weather data found for this location/period.")
+        return
+
+    frames = []
+    for yr, wdf in by_year.items():
+        wdf = wdf.dropna(subset=["IRRADIATION(W/m²)", "AMBIENT_TEMPERATURE(°C)"]).copy()
+        if wdf.empty:
+            continue
+        module_temp, dc_per_kwp, ac_per_kwp, dc_kw, ac_kw = pu.run_physics(
+            capacity_kwp, wdf["IRRADIATION(W/m²)"].values, wdf["AMBIENT_TEMPERATURE(°C)"].values,
+            wdf["WIND_SPEED(m/s)"].values
+        )
+        wdf["MODULE_TEMP"] = module_temp
+        wdf["THEORETICAL_AC_KW"] = ac_kw
+        wdf["THEORETICAL_DC_KW"] = dc_kw
+
+        if model is not None:
+            X = mu.build_rows(wdf, features)
+            combined_pk, combined_kw, gap = mu.combine(model, X, wdf["IRRADIATION(W/m²)"].values, ac_per_kwp, capacity_kwp)
+            wdf["FINAL_AC_KW"] = combined_kw
+        else:
+            wdf["FINAL_AC_KW"] = wdf["THEORETICAL_AC_KW"]
+
+        wdf["YEAR"] = yr
+        wdf["DAY_OFFSET"] = (wdf["DATE_TIME"].dt.date - wdf["DATE_TIME"].dt.date.min()).apply(lambda d: d.days)
+        frames.append(wdf)
+
+    data = pd.concat(frames, ignore_index=True)
+    num_days = (end - start).days + 1
+    yearly_totals = data.groupby("YEAR")["FINAL_AC_KW"].sum()
+
+    daylight = data[data["IRRADIATION(W/m²)"] > 0]
+    capacity_factor = data["FINAL_AC_KW"].mean() / capacity_kwp * 100
+    daytime_eff = (daylight["FINAL_AC_KW"] / capacity_kwp).mean() * 100 if len(daylight) else 0.0
+
+    st.subheader("Expected Outputs")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Avg AC Power (physics + AI)", f"{data['FINAL_AC_KW'].mean():.2f} kW")
+    c2.metric("Avg AC Power (physics only)", f"{data['THEORETICAL_AC_KW'].mean():.2f} kW")
+    c3.metric("Avg DC Power (physics only)", f"{data['THEORETICAL_DC_KW'].mean():.2f} kW")
+    c4.metric("Avg Module Temp", f"{data['MODULE_TEMP'].mean():.1f} C")
+
+    c5, c6, c7 = st.columns(3)
+    c5.metric("Avg Daily Yield", f"{yearly_totals.mean() / num_days:.0f} kWh")
+    c6.metric("Capacity Factor (24h basis)", f"{capacity_factor:.1f}%",
+               help="Average output over all hours including night, divided by rated capacity.")
+    c7.metric("Daytime Efficiency", f"{daytime_eff:.1f}%",
+               help="Average output only during sunlight hours, divided by rated capacity.")
+
+    fig_compare = go.Figure(data=[
+        go.Bar(name="DC (physics only)", x=["Power"], y=[data["THEORETICAL_DC_KW"].mean()]),
+        go.Bar(name="AC (physics only)", x=["Power"], y=[data["THEORETICAL_AC_KW"].mean()]),
+        go.Bar(name="AC (physics + AI)", x=["Power"], y=[data["FINAL_AC_KW"].mean()]),
+    ])
+    fig_compare.update_layout(title="Physics vs. AI-Corrected Prediction (avg over window)", yaxis_title="kW", barmode="group")
+    st.plotly_chart(fig_compare, use_container_width=True)
+
+    st.subheader("Range of Likely Outcomes")
+    st.caption("Built from up to 10 past years of weather for this same calendar window -- "
+               "use this to judge how much variation to plan around, not as a record of past output.")
+    quantiles = yearly_totals.quantile([0.1, 0.25, 0.5, 0.75, 0.9])
+    q1, q2, q3, q4, q5 = st.columns(5)
+    q1.metric("P10", f"{quantiles[0.1]:.0f} kWh")
+    q2.metric("P25", f"{quantiles[0.25]:.0f} kWh")
+    q3.metric("P50 (Median)", f"{quantiles[0.5]:.0f} kWh")
+    q4.metric("P75", f"{quantiles[0.75]:.0f} kWh")
+    q5.metric("P90", f"{quantiles[0.9]:.0f} kWh")
+
+    fig_box = go.Figure(go.Box(y=yearly_totals.values, boxpoints="all", name="Yearly Totals"))
+    fig_box.update_layout(title="Spread of Total Energy for This Window (across past years)", yaxis_title="kWh")
+    st.plotly_chart(fig_box, use_container_width=True)
+
+    st.subheader("Forecast Shape")
+    ch1, ch2 = st.columns(2)
+    with ch1:
+        hourly = data.groupby(data["DATE_TIME"].dt.hour)["FINAL_AC_KW"].mean().reset_index()
+        hourly.columns = ["hour", "avg_kw"]
+        fig_hour = px.line(hourly, x="hour", y="avg_kw", title="Typical Day Shape (avg AC power by hour)")
+        st.plotly_chart(fig_hour, use_container_width=True)
+
+        fig_w = go.Figure()
+        fig_w.add_trace(go.Bar(name="Irradiation (W/m2)", x=["Avg"], y=[data["IRRADIATION(W/m²)"].mean()]))
+        fig_w.add_trace(go.Bar(name="Ambient Temp (C)", x=["Avg"], y=[data["AMBIENT_TEMPERATURE(°C)"].mean()]))
+        fig_w.update_layout(title="Average Weather Conditions", barmode="group")
+        st.plotly_chart(fig_w, use_container_width=True)
+
+    with ch2:
+        daily_per_year = data.groupby(["YEAR", "DAY_OFFSET"])["FINAL_AC_KW"].sum().reset_index()
+        avg_by_day = daily_per_year.groupby("DAY_OFFSET")["FINAL_AC_KW"].mean().reset_index()
+        avg_by_day["DAY_OFFSET"] = avg_by_day["DAY_OFFSET"] + 1
+        fig_day = px.bar(avg_by_day, x="DAY_OFFSET", y="FINAL_AC_KW",
+                          title="Expected Daily Yield Within Window (avg across years)")
+        st.plotly_chart(fig_day, use_container_width=True)
+
+    st.subheader("Interpretation")
+    theo_mean = data["THEORETICAL_AC_KW"].mean()
+    final_mean = data["FINAL_AC_KW"].mean()
+    correction_pct = ((final_mean - theo_mean) / theo_mean * 100) if theo_mean > 0 else 0.0
+    st.markdown(f"- For **{start} to {end}**, expect roughly **{quantiles[0.1]:.0f} to {quantiles[0.9]:.0f} kWh** total (P10-P90 range), median **{quantiles[0.5]:.0f} kWh**.")
+    if abs(correction_pct) < 1:
+        st.markdown("- The AI correction is minimal here -- the physics-only estimate is already close to real-world behavior for these conditions.")
+    elif correction_pct < 0:
+        st.markdown(f"- Real-world output tends to run **{abs(correction_pct):.1f}% below** the physics-only estimate for these conditions.")
+    else:
+        st.markdown(f"- Real-world output tends to run **{correction_pct:.1f}% above** the physics-only estimate for these conditions.")
+    st.markdown(f"- Daytime efficiency runs around **{daytime_eff:.1f}%** of rated capacity.")
+    if model is None:
+        st.markdown("- These numbers are physics-only since the ML correction model was not found.")
