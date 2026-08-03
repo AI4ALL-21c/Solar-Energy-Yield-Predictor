@@ -20,6 +20,10 @@ Run the interactive app with:
 streamlit run app.py
 ```
 
+```link
+https://solargenpredictor-krnqtwjnhkit2ysddxxazx.streamlit.app/
+```
+
 The UI lets users:
 - Enter date and time
 - Adjust irradiation and temperature values
