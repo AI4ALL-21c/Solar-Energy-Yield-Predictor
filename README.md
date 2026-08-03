@@ -21,7 +21,7 @@ streamlit run app.py
 ```
 
 ```link
-https://solargenpredictor-krnqtwjnhkit2ysddxxazx.streamlit.app/
+https://solar-energy-yield-predictor-b2somffs8gmotjcdksczlr.streamlit.app/
 ```
 
 The UI lets users:
