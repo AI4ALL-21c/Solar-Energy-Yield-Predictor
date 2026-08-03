@@ -15,11 +15,12 @@ DEFAULT_MODULE_EFFICIENCY = 0.18  # used to back out an assumed capacity from ar
 
 
 def estimate_module_temperature(ambient_temp_c, irradiance_wm2, wind_speed_ms=None, noct=DEFAULT_NOCT):
-    if wind_speed_ms is not None:
-        u0, u1 = 25.0, 6.84
-        delta_t = irradiance_wm2 / (u0 + u1 * wind_speed_ms)
-    else:
-        delta_t = (noct - 20) * (irradiance_wm2 / 800.0)
+    noct_delta = (noct - 20) * (irradiance_wm2 / 800.0)
+    if wind_speed_ms is None:
+        return ambient_temp_c + noct_delta
+    wind_speed_ms = np.asarray(wind_speed_ms, dtype=float)
+    wind_delta = irradiance_wm2 / (25.0 + 6.84 * wind_speed_ms)
+    delta_t = np.where(np.isnan(wind_speed_ms), noct_delta, wind_delta)
     return ambient_temp_c + delta_t
 
 
