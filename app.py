@@ -1,21 +1,30 @@
 import json
 import pathlib
+from datetime import date, datetime, time, timedelta
 
 import joblib
 import pandas as pd
+import plotly.graph_objects as go
+import requests
 import streamlit as st
 
 from constants import PLANT_CAPACITY_KWP
 from pipeline_functions import (
-    PLANT_LATITUDE_DEG,
+    MONTH_NAMES,
+    SEASON_MONTHS,
+    STC_IRRADIANCE,
     build_feature_row,
-    build_time_features,
     calculate_ac_power_per_kwp,
     calculate_dc_power_per_kwp,
-    check_out_of_range,
     estimate_module_temperature,
     features as FEATURE_COLUMNS,
+    fetch_archive,
+    geocode_location,
+    historical_windows,
+    next_month_window,
+    next_season_window,
     predict_combined_ac_kw,
+    run_forecast_pipeline,
 )
 
 APP_DIR = pathlib.Path(__file__).parent
@@ -24,16 +33,9 @@ MODEL_PATH = APP_DIR / 'solar_gap_model.joblib'
 METADATA_PATH = APP_DIR / 'solar_gap_model_metadata.json'
 
 st.set_page_config(
-    page_title='Solar Yield Predictor',
+    page_title='Solar Forecast',
     page_icon='☀️',
     layout='wide',
-)
-
-st.title('☀️ Solar Energy Yield Predictor')
-st.write(
-    'Enter weather and time inputs to get a DC power estimate from the trained '
-    'XGBoost gap model. The model predicts the residual gap between a physics-based '
-    'theoretical baseline and actual plant output, then combines the two.'
 )
 
 
@@ -60,127 +62,363 @@ def load_metadata():
 
 
 @st.cache_data
-def load_data() -> pd.DataFrame:
+def load_plant_data(_model) -> pd.DataFrame:
     df = pd.read_csv(DATA_PATH)
     df['DATE_TIME'] = pd.to_datetime(df['DATE_TIME'])
-    df = build_time_features(df)
-    df['ACTUAL_AC_PER_KWP'] = df['ACTUAL_AC_POWER(kW)'] / PLANT_CAPACITY_KWP
-    return df
+    return run_forecast_pipeline(df, capacity_kwp=PLANT_CAPACITY_KWP, model=_model)
 
 
 model = load_model()
 metadata = load_metadata()
-df = load_data()
 
-split_idx = max(int(len(df) * 0.8), 1)
-holdout = df.iloc[split_idx:]
-holdout_combined_kw, _ = predict_combined_ac_kw(
-    model,
-    holdout[FEATURE_COLUMNS],
-    holdout['IRRADIATION(W/m²)'],
-    holdout['THEORETICAL_AC_PER_KWP'],
-    PLANT_CAPACITY_KWP,
-)
-test_preview = pd.DataFrame(
-    {
-        'Actual': holdout['ACTUAL_AC_POWER(kW)'].reset_index(drop=True),
-        'Predicted': pd.Series(holdout_combined_kw),
-    }
+with st.sidebar:
+    st.success('Model loaded.')
+
+st.title('Solar Forecast')
+
+tab_forecast, tab_analyzer, tab_calc, tab_how = st.tabs(
+    ['Forecast', 'Plant Performance Analyzer', 'Quick Calculator', 'How It Works']
 )
 
-left, right = st.columns([1.05, 1])
+# ---------------------------------------------------------------- Forecast --
+with tab_forecast:
+    st.header('Forecast')
+    st.caption('Estimate expected generation for an upcoming period, based on historical weather patterns.')
 
-with left:
-    st.subheader('Model Summary')
-    st.metric('Active model', 'XGBoost (gap model)')
-    st.metric('Backtest R² (AC kW)', f"{metadata['backtest_r2_kw']:.3f}")
-    st.metric('Backtest RMSE', f"{metadata['backtest_rmse_kw']:.2f} kW")
-    st.metric('Backtest MAE', f"{metadata['backtest_mae_kw']:.2f} kW")
+    col_left, col_right = st.columns([1.3, 1])
+    with col_left:
+        capacity_kwp = st.number_input('Plant Capacity (kWp)', min_value=0.1, value=100.0, step=10.0)
+    with col_right:
+        period_mode = st.radio(
+            'Pick period by', ['Month', 'Season', 'Specific Date', 'Date Range'], horizontal=True
+        )
+
+    location_input = st.text_input('Location', placeholder='e.g. Chennai, India')
+
+    if period_mode == 'Month':
+        month_choice = st.selectbox('Month', MONTH_NAMES, index=0)
+        start_date, end_date = next_month_window(MONTH_NAMES.index(month_choice) + 1)
+    elif period_mode == 'Season':
+        season_choice = st.selectbox('Season', list(SEASON_MONTHS.keys()), index=0)
+        start_date, end_date = next_season_window(season_choice)
+    elif period_mode == 'Specific Date':
+        start_date = st.date_input('Date', value=date.today() + timedelta(days=30))
+        end_date = start_date
+    else:
+        default_start = date.today() + timedelta(days=30)
+        picked = st.date_input('Date Range', value=(default_start, default_start + timedelta(days=6)))
+        if isinstance(picked, tuple) and len(picked) == 2:
+            start_date, end_date = picked
+        else:
+            start_date = end_date = picked
+
+    n_days = (end_date - start_date).days + 1
     st.caption(
-        'Official metrics from the retrained gap model: '
-        f"Linear Regression ≈ 0.696 R², Random Forest ≈ 0.795 R², "
-        f"XGBoost ≈ 0.963 R² (see README/deployment_notes)."
+        f'Forecasting **{start_date.isoformat()} to {end_date.isoformat()}** ({n_days} day window), '
+        'projected from up to 10 years of historical weather for this same calendar period.'
     )
 
-    st.subheader('Make a Prediction')
-    with st.form('prediction_form'):
-        location_name = st.text_input('Location', value='Training plant (Puducherry, India)')
-        location_lat = st.number_input(
-            'Location latitude (°)',
-            min_value=-90.0,
-            max_value=90.0,
-            value=PLANT_LATITUDE_DEG,
-            step=0.5,
-            help="No geocoding is available, so latitude is entered directly. It's compared "
-                 "against the training plant's latitude to flag predictions far from where the "
-                 'model was trained.',
-        )
-        system_capacity_kwp = st.number_input(
-            'System capacity (kWp)', min_value=1.0, value=float(PLANT_CAPACITY_KWP), step=100.0
-        )
-        date_value = st.date_input('Date', value=pd.Timestamp(df['DATE_TIME'].iloc[-1]).date())
-        time_value = st.time_input('Time', value=pd.Timestamp(df['DATE_TIME'].iloc[-1]).time())
-        irradiation = st.number_input('Irradiation (W/m²)', min_value=0.0, value=800.0, step=10.0)
-        ambient_temp = st.number_input('Ambient temperature (°C)', value=30.0, step=0.5)
-        wind_speed = st.number_input('Wind speed (m/s)', min_value=0.0, value=2.0, step=0.5)
-        cloud_cover = st.number_input('Cloud cover (%)', min_value=0.0, max_value=100.0, value=40.0, step=5.0)
-        submitted = st.form_submit_button('Predict AC Power')
+    run_forecast = st.button('Run Forecast', width='stretch')
 
-    if submitted:
-        timestamp = pd.Timestamp.combine(date_value, time_value)
+    if run_forecast:
+        if not location_input.strip():
+            st.error('Please enter a location.')
+        else:
+            try:
+                with st.spinner(f'Looking up "{location_input}"...'):
+                    lat, lon, tz = geocode_location(location_input)
+                st.caption(f'Using {location_input} (lat {lat:.2f}, lon {lon:.2f})')
+
+                windows = historical_windows(start_date, end_date, historical_years=10)
+                by_year_weather = {}
+                with st.spinner('Fetching historical weather...'):
+                    for yr, (w_start, w_end) in sorted(windows.items()):
+                        try:
+                            by_year_weather[yr] = fetch_archive(
+                                lat, lon, w_start.isoformat(), w_end.isoformat(), tz
+                            )
+                        except requests.exceptions.RequestException:
+                            continue
+
+                if not by_year_weather:
+                    st.error('Could not fetch historical weather for this location and period.')
+                else:
+                    by_year_results = {
+                        yr: run_forecast_pipeline(wdf, capacity_kwp, model)
+                        for yr, wdf in by_year_weather.items()
+                    }
+                    combined_all_years = pd.concat(by_year_results.values(), ignore_index=True)
+
+                    avg_ac_ai = combined_all_years['FINAL_AC_KW'].mean()
+                    avg_ac_physics = combined_all_years['THEORETICAL_AC_KW'].mean()
+                    avg_dc_physics = combined_all_years['DC_POWER_KW'].mean()
+                    avg_module_temp = combined_all_years['MODULE_TEMPERATURE(°C)'].mean()
+                    avg_daily_yield = avg_ac_ai * 24
+                    capacity_factor = avg_ac_ai / capacity_kwp * 100
+                    daytime_mask = combined_all_years['IRRADIATION(W/m²)'] > 0
+                    daytime_efficiency = (
+                        combined_all_years.loc[daytime_mask, 'FINAL_AC_KW'].mean() / capacity_kwp * 100
+                        if daytime_mask.any() else 0.0
+                    )
+
+                    st.subheader('Expected Outputs')
+                    m1, m2, m3, m4 = st.columns(4)
+                    m1.metric('Avg AC Power (physics + AI)', f'{avg_ac_ai:.2f} kW')
+                    m2.metric('Avg AC Power (physics only)', f'{avg_ac_physics:.2f} kW')
+                    m3.metric('Avg DC Power (physics only)', f'{avg_dc_physics:.2f} kW')
+                    m4.metric('Avg Module Temp', f'{avg_module_temp:.1f} C')
+
+                    m5, m6, m7 = st.columns(3)
+                    m5.metric('Avg Daily Yield', f'{avg_daily_yield:,.0f} kWh')
+                    m6.metric(
+                        'Capacity Factor (24h basis)', f'{capacity_factor:.1f}%',
+                        help='Average AC power (physics + AI), divided by plant capacity, averaged over all 24 hours of the day.',
+                    )
+                    m7.metric(
+                        'Daytime Efficiency', f'{daytime_efficiency:.1f}%',
+                        help='Average AC power (physics + AI), divided by plant capacity, averaged only over hours with nonzero irradiation.',
+                    )
+
+                    if len(by_year_results) > 1:
+                        st.subheader('Year-to-Year Variability')
+                        yearly_totals = [df['FINAL_AC_KW'].sum() * 1.0 for df in by_year_results.values()]
+                        fig_box = go.Figure(go.Box(y=yearly_totals, name='Yearly Totals', boxpoints='all', jitter=0.5, pointpos=-1.8))
+                        fig_box.update_layout(yaxis_title='kWh', height=400)
+                        st.plotly_chart(fig_box, width='stretch')
+
+                    st.subheader('Forecast Shape')
+                    fc1, fc2 = st.columns(2)
+                    with fc1:
+                        hourly_shape = (
+                            combined_all_years.assign(hour=combined_all_years['DATE_TIME'].dt.hour)
+                            .groupby('hour')['FINAL_AC_KW'].mean().reset_index().rename(columns={'FINAL_AC_KW': 'avg_kw'})
+                        )
+                        fig_day = go.Figure(go.Scatter(x=hourly_shape['hour'], y=hourly_shape['avg_kw'], mode='lines'))
+                        fig_day.update_layout(
+                            title='Typical Day Shape (avg AC power by hour)', xaxis_title='hour', yaxis_title='avg_kw', height=400
+                        )
+                        st.plotly_chart(fig_day, width='stretch')
+                    with fc2:
+                        daily_frames = []
+                        for yr_df in by_year_results.values():
+                            daily = yr_df.groupby(yr_df['DATE_TIME'].dt.date)['FINAL_AC_KW'].sum().reset_index()
+                            daily.columns = ['date', 'FINAL_AC_KW']
+                            daily['DAY_OFFSET'] = range(1, len(daily) + 1)
+                            daily_frames.append(daily)
+                        daily_avg = pd.concat(daily_frames, ignore_index=True).groupby('DAY_OFFSET')['FINAL_AC_KW'].mean().reset_index()
+                        fig_daily = go.Figure(go.Bar(x=daily_avg['DAY_OFFSET'], y=daily_avg['FINAL_AC_KW']))
+                        fig_daily.update_layout(
+                            title='Expected Daily Yield Within Window (avg across years)',
+                            xaxis_title='DAY_OFFSET', yaxis_title='FINAL_AC_KW', height=400,
+                        )
+                        st.plotly_chart(fig_daily, width='stretch')
+
+                    st.subheader('Average Weather Conditions')
+                    avg_irr = combined_all_years['IRRADIATION(W/m²)'].mean()
+                    avg_temp = combined_all_years['AMBIENT_TEMPERATURE(°C)'].mean()
+                    fig_weather = go.Figure()
+                    fig_weather.add_trace(go.Bar(x=['Irradiation (W/m2)'], y=[avg_irr], name='Irradiation (W/m2)', marker_color='#8fd3fe'))
+                    fig_weather.add_trace(go.Bar(x=['Ambient Temp (C)'], y=[avg_temp], name='Ambient Temp (C)', marker_color='#1f6fb4'))
+                    fig_weather.update_layout(height=400)
+                    st.plotly_chart(fig_weather, width='stretch')
+            except requests.exceptions.RequestException as exc:
+                st.error(f'Could not reach the weather API: {exc}')
+            except ValueError as exc:
+                st.error(str(exc))
+
+# -------------------------------------------------- Plant Performance Analyzer --
+with tab_analyzer:
+    st.header('Plant Performance Analyzer')
+    st.caption("Explore how well the model tracks the real training plant's recorded output over a chosen window.")
+
+    plant_df = load_plant_data(model)
+    min_date, max_date = plant_df['DATE_TIME'].min().date(), plant_df['DATE_TIME'].max().date()
+    picked_range = st.date_input('Date range', value=(min_date, max_date), min_value=min_date, max_value=max_date)
+    if isinstance(picked_range, tuple) and len(picked_range) == 2:
+        range_start, range_end = picked_range
+    else:
+        range_start, range_end = min_date, max_date
+
+    mask = (plant_df['DATE_TIME'].dt.date >= range_start) & (plant_df['DATE_TIME'].dt.date <= range_end)
+    window_df = plant_df.loc[mask]
+
+    if window_df.empty:
+        st.warning('No data in the selected range.')
+    else:
+        interval_hours = 0.25
+        actual_kwh = window_df['ACTUAL_AC_POWER(kW)'].sum() * interval_hours
+        final_kwh = window_df['FINAL_AC_KW'].sum() * interval_hours
+        theo_kwh = window_df['THEORETICAL_AC_KW'].sum() * interval_hours
+        mae = (window_df['ACTUAL_AC_POWER(kW)'] - window_df['FINAL_AC_KW']).abs().mean()
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric('Actual Yield', f'{actual_kwh:,.0f} kWh')
+        c2.metric('Predicted Yield (physics + AI)', f'{final_kwh:,.0f} kWh')
+        c3.metric('Predicted Yield (physics only)', f'{theo_kwh:,.0f} kWh')
+        c4.metric('Mean Absolute Error', f'{mae:,.1f} kW')
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=window_df['DATE_TIME'], y=window_df['ACTUAL_AC_POWER(kW)'], name='Actual', line=dict(color='#f2c14e')))
+        fig.add_trace(go.Scatter(x=window_df['DATE_TIME'], y=window_df['FINAL_AC_KW'], name='Predicted (physics + AI)', line=dict(color='#2A5298')))
+        fig.add_trace(go.Scatter(x=window_df['DATE_TIME'], y=window_df['THEORETICAL_AC_KW'], name='Physics baseline', line=dict(color='gray', dash='dash')))
+        fig.update_layout(title='Actual vs Predicted AC Power', xaxis_title='Time', yaxis_title='kW', height=450)
+        st.plotly_chart(fig, width='stretch')
+
+        residual = window_df['ACTUAL_AC_POWER(kW)'] - window_df['FINAL_AC_KW']
+        fig_resid = go.Figure(go.Scatter(x=window_df['DATE_TIME'], y=residual, mode='lines', line=dict(color='#b23b3b')))
+        fig_resid.update_layout(title='Residual (Actual - Predicted)', xaxis_title='Time', yaxis_title='kW', height=350)
+        st.plotly_chart(fig_resid, width='stretch')
+
+# ------------------------------------------------------- Quick Calculator --
+with tab_calc:
+    st.header('Quick Calculator')
+    st.caption('Test the model for one specific set of conditions.')
+
+    qc_left, qc_right = st.columns(2)
+    with qc_left:
+        qc_capacity = st.number_input('Plant Capacity (kWp)', min_value=0.1, value=100.0, step=10.0, key='qc_capacity')
+        qc_date = st.date_input('Date', value=date.today(), key='qc_date')
+        qc_time = st.time_input('Time', value=time(6, 58), key='qc_time')
+        qc_irradiation = st.number_input('Irradiation (W/m2)', min_value=0.0, value=1000.0, step=10.0, key='qc_irr')
+        qc_ambient = st.number_input('Ambient Temperature (C)', value=25.0, step=0.5, key='qc_ambient')
+    with qc_right:
+        qc_wind = st.number_input('Wind Speed (m/s)', min_value=0.0, value=0.0, step=0.5, key='qc_wind')
+        qc_use_wind = st.checkbox('Use wind speed above (uncheck to use NOCT fallback)', value=False, key='qc_use_wind')
+        qc_cloud = st.number_input('Cloud Cover (%)', min_value=0.0, max_value=100.0, value=0.0, step=5.0, key='qc_cloud')
+        qc_inverter_eff = st.number_input('Inverter Efficiency', min_value=0.5, max_value=1.0, value=0.97, step=0.01, key='qc_inv_eff')
+
+    qc_submitted = st.button('Calculate', width='stretch')
+
+    if qc_submitted:
+        timestamp = datetime.combine(qc_date, qc_time)
         hour = timestamp.hour + timestamp.minute / 60.0
-        day_of_year = timestamp.dayofyear
+        day_of_year = timestamp.timetuple().tm_yday
+        wind_for_physics = qc_wind if qc_use_wind else None
+        wind_for_model = qc_wind if qc_use_wind else 0.0
 
-        module_temp = estimate_module_temperature(ambient_temp, irradiation, wind_speed)
-        theoretical_dc_per_kwp = calculate_dc_power_per_kwp(irradiation, module_temp)
-        theoretical_ac_per_kwp = calculate_ac_power_per_kwp(theoretical_dc_per_kwp)
+        module_temp = estimate_module_temperature(qc_ambient, qc_irradiation, wind_for_physics)
+        irradiance_ratio = qc_irradiation / STC_IRRADIANCE
+        dc_per_kwp = calculate_dc_power_per_kwp(qc_irradiation, module_temp)
+        ac_per_kwp_theoretical = calculate_ac_power_per_kwp(dc_per_kwp, qc_inverter_eff)
 
-        feature_row = build_feature_row(irradiation, ambient_temp, wind_speed, cloud_cover, hour, day_of_year)
+        feature_row = build_feature_row(qc_irradiation, qc_ambient, wind_for_model, qc_cloud, hour, day_of_year)
         combined_kw, predicted_gap = predict_combined_ac_kw(
-            model, feature_row, [irradiation], [theoretical_ac_per_kwp], system_capacity_kwp
+            model, feature_row, [qc_irradiation], [ac_per_kwp_theoretical], qc_capacity
         )
-        st.success(f'Estimated AC power for {location_name}: {combined_kw[0]:.2f} kW')
-        st.caption(
-            f'Theoretical baseline: {theoretical_ac_per_kwp * system_capacity_kwp:.2f} kW, '
-            f'model-predicted gap: {predicted_gap[0]:+.4f} per kWp, '
-            f'estimated module temperature: {module_temp:.1f} °C'
-        )
+        final_ac_kw = float(combined_kw[0])
+        gap = float(predicted_gap[0])
+        combined_per_kwp = final_ac_kw / qc_capacity
 
-        out_of_range, reasons = check_out_of_range(lat=location_lat, requested_months={timestamp.month})
-        if out_of_range:
-            st.warning(
-                'This request falls outside what the model was trained on, so treat the '
-                'estimate with caution: ' + '; '.join(reasons)
-            )
+        g1, g2 = st.columns(2)
+        with g1:
+            fig_power = go.Figure(go.Indicator(
+                mode='gauge+number',
+                value=final_ac_kw,
+                title={'text': 'Power'},
+                gauge={
+                    'axis': {'range': [0, qc_capacity]},
+                    'bar': {'color': '#2A5298'},
+                    'steps': [
+                        {'range': [0, qc_capacity / 3], 'color': '#8fd3fe'},
+                        {'range': [qc_capacity / 3, 2 * qc_capacity / 3], 'color': '#4f8fc0'},
+                        {'range': [2 * qc_capacity / 3, qc_capacity], 'color': '#f7a8a8'},
+                    ],
+                },
+            ))
+            fig_power.update_layout(height=350)
+            st.plotly_chart(fig_power, width='stretch')
+        with g2:
+            fig_temp = go.Figure(go.Indicator(
+                mode='gauge+number',
+                value=module_temp,
+                title={'text': 'Module Temperature (C)'},
+                gauge={
+                    'axis': {'range': [0, 80]},
+                    'bar': {'color': '#b23b3b'},
+                    'steps': [
+                        {'range': [0, 30], 'color': 'rgba(90,180,90,0.35)'},
+                        {'range': [30, 45], 'color': 'rgba(230,190,80,0.35)'},
+                        {'range': [45, 80], 'color': 'rgba(230,90,90,0.35)'},
+                    ],
+                },
+            ))
+            fig_temp.update_layout(height=350)
+            st.plotly_chart(fig_temp, width='stretch')
 
-        st.dataframe(feature_row, width='stretch')
+        fig_waterfall = go.Figure(go.Waterfall(
+            x=['Irradiance ratio', 'Temp. effect', 'Inverter loss', 'ML correction', 'Final (per kWp)'],
+            measure=['relative', 'relative', 'relative', 'relative', 'total'],
+            y=[
+                irradiance_ratio,
+                dc_per_kwp - irradiance_ratio,
+                ac_per_kwp_theoretical - dc_per_kwp,
+                gap,
+                combined_per_kwp,
+            ],
+            increasing={'marker': {'color': '#8fd3fe'}},
+            decreasing={'marker': {'color': '#f7a8a8'}},
+            totals={'marker': {'color': '#5aa9e6'}},
+        ))
+        fig_waterfall.update_layout(title='Loss / Correction Breakdown (per kWp)', height=450)
+        st.plotly_chart(fig_waterfall, width='stretch')
 
-with right:
-    st.subheader('Quick Check on Holdout Data')
-    st.line_chart(test_preview.head(200), x='Actual', y='Predicted')
-    st.caption(
-        'Each point compares the model\'s predicted AC power against the actual recorded '
-        'power for data the model did not train on. The closer the points track a straight '
-        'diagonal (predicted = actual), the more accurate the model is.'
+# ------------------------------------------------------------- How It Works --
+with tab_how:
+    st.header('How It Works')
+
+    st.subheader('Overview')
+    st.write(
+        'This app estimates solar plant electricity generation by combining a physics-based model '
+        'with a machine-learning correction trained on real plant data. Physics alone misses '
+        'real-world losses like soiling and wiring. ML alone would not generalize outside its '
+        'training data. Combining them keeps predictions grounded.'
     )
-    st.dataframe(test_preview.head(10), width='stretch')
 
-st.divider()
+    st.subheader('Methodology')
+    st.code(
+        'Weather Inputs\n'
+        '      |\n'
+        'Physics Model -> Module Temperature -> DC Power -> AC Power (theoretical)\n'
+        '      |\n'
+        'Machine Learning -> predicts the real-world gap vs theoretical\n'
+        '      |\n'
+        'Final Prediction = Theoretical AC + ML Correction',
+        language=None,
+    )
 
-st.subheader('Feature Importance')
-if hasattr(model, 'feature_importances_'):
+    st.subheader('Inputs')
+    st.markdown(
+        '- **Plant Capacity (kWp)**: required, scales every result to kW.\n'
+        '- **Irradiation (W/m2)**: default 1000 (STC).\n'
+        '- **Ambient Temperature (C)**: default 25 (STC).\n'
+        '- **Wind Speed (m/s)**: optional, falls back to the NOCT formula if blank.\n'
+        '- **Cloud Cover (%)**: default 0.0, used by the ML model only.\n'
+        '- **Inverter Efficiency**: default 0.97, used for the physics baseline only.\n'
+    )
+
+    st.subheader('Model Performance')
+    st.markdown('**Feature Importance**')
     importance_df = pd.DataFrame(
-        {
-            'Feature': FEATURE_COLUMNS,
-            'Importance': model.feature_importances_,
-        }
-    ).sort_values('Importance', ascending=False)
-    st.bar_chart(importance_df.set_index('Feature'))
-    st.caption(
-        "How much each input drives the model's prediction of the gap between theoretical "
-        'and actual output. Taller bars mean the model leans on that feature more heavily; '
-        "it doesn't say whether the effect is positive or negative, only how much it matters."
-    )
-else:
-    st.info('Feature importance is not available for this estimator.')
+        {'feature': FEATURE_COLUMNS, 'importance': model.feature_importances_}
+    ).sort_values('importance')
+    fig_importance = go.Figure(go.Bar(
+        x=importance_df['importance'], y=importance_df['feature'], orientation='h', marker_color='#6fb1f0'
+    ))
+    fig_importance.update_layout(xaxis_title='importance', yaxis_title='feature', height=450)
+    st.plotly_chart(fig_importance, width='stretch')
 
+    perf1, perf2, perf3 = st.columns(3)
+    perf1.metric('Backtest RMSE (kW)', f"{metadata['backtest_rmse_kw']:.1f}")
+    perf2.metric('Backtest MAE (kW)', f"{metadata['backtest_mae_kw']:.1f}")
+    perf3.metric('Backtest R2', f"{metadata['backtest_r2_kw']:.3f}")
+
+    with st.expander('Full metadata'):
+        st.json(metadata)
+
+    st.subheader('Limitations')
+    st.markdown(
+        '- Extreme or unusual weather outside the training range.\n'
+        '- Equipment faults, soiling, or degradation not captured by the model.\n'
+        '- Missing input values reduce accuracy (e.g. no wind data uses the NOCT fallback).\n'
+        '- Trained on a limited historical window from one plant/region.\n'
+    )
