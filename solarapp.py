@@ -11,11 +11,7 @@ mu.inject_theme_css()
 model = mu.load_model()
 metadata = mu.load_metadata()
 
-st.markdown(
-    '<div class="app-banner"><h1>☀️ Solar Forecast</h1>'
-    '<p>Physics-based solar yield estimates, corrected with a trained ML model.</p></div>',
-    unsafe_allow_html=True,
-)
+mu.render_banner("☀️ Solar Forecast", "Physics-based solar yield estimates, corrected with a trained ML model.")
 
 if model is None:
     st.sidebar.warning("Model file not found, running physics-only.")

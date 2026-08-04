@@ -63,44 +63,47 @@ def render(model, metadata):
     theo_kwh = window_df["THEORETICAL_AC_KW"].sum() * interval_hours
     mae = (window_df["ACTUAL_AC_POWER(kW)"] - window_df["FINAL_AC_KW"]).abs().mean()
 
-    mu.render_stat_cards([
-        ("Actual Yield", f"{actual_kwh:,.0f} kWh"),
-        ("Predicted Yield (physics + AI)", f"{final_kwh:,.0f} kWh"),
-        ("Predicted Yield (physics only)", f"{theo_kwh:,.0f} kWh"),
-        ("Mean Absolute Error", f"{mae:,.1f} kW"),
-    ])
-    st.caption(
-        "**Actual Yield** is what the plant really produced in this window. **Predicted Yield (physics + AI)** is "
-        "the app's final estimate for the same window. **Predicted Yield (physics only)** is the estimate before "
-        "the ML correction, so you can see how much the correction is doing. **Mean Absolute Error** is the "
-        "average gap, in kW, between the physics + AI prediction and reality -- lower is better."
-    )
+    with mu.panel("t2_outputs"):
+        mu.render_stat_cards([
+            ("Actual Yield", f"{actual_kwh:,.0f} kWh"),
+            ("Predicted Yield (physics + AI)", f"{final_kwh:,.0f} kWh"),
+            ("Predicted Yield (physics only)", f"{theo_kwh:,.0f} kWh"),
+            ("Mean Absolute Error", f"{mae:,.1f} kW"),
+        ])
+        st.caption(
+            "**Actual Yield** is what the plant really produced in this window. **Predicted Yield (physics + AI)** is "
+            "the app's final estimate for the same window. **Predicted Yield (physics only)** is the estimate before "
+            "the ML correction, so you can see how much the correction is doing. **Mean Absolute Error** is the "
+            "average gap, in kW, between the physics + AI prediction and reality -- lower is better."
+        )
 
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=window_df["DATE_TIME"], y=window_df["ACTUAL_AC_POWER(kW)"], name="Actual", line=dict(color="#f2c14e")
-    ))
-    fig.add_trace(go.Scatter(
-        x=window_df["DATE_TIME"], y=window_df["FINAL_AC_KW"], name="Predicted (physics + AI)", line=dict(color="#2A5298")
-    ))
-    fig.add_trace(go.Scatter(
-        x=window_df["DATE_TIME"], y=window_df["THEORETICAL_AC_KW"], name="Physics baseline",
-        line=dict(color="gray", dash="dash")
-    ))
-    fig.update_layout(title="Actual vs Predicted AC Power", xaxis_title="Time", yaxis_title="kW", height=450)
-    st.plotly_chart(fig, use_container_width=True)
-    st.caption(
-        "Yellow is what the plant actually produced. Blue is the app's final prediction (physics + AI). The dashed "
-        "gray line is the physics-only estimate with no ML correction -- the gap between blue and gray is what the "
-        "ML correction is contributing."
-    )
+    with mu.panel("t2_actual_vs_predicted"):
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=window_df["DATE_TIME"], y=window_df["ACTUAL_AC_POWER(kW)"], name="Actual", line=dict(color="#f2c14e")
+        ))
+        fig.add_trace(go.Scatter(
+            x=window_df["DATE_TIME"], y=window_df["FINAL_AC_KW"], name="Predicted (physics + AI)", line=dict(color="#2A5298")
+        ))
+        fig.add_trace(go.Scatter(
+            x=window_df["DATE_TIME"], y=window_df["THEORETICAL_AC_KW"], name="Physics baseline",
+            line=dict(color="gray", dash="dash")
+        ))
+        fig.update_layout(title="Actual vs Predicted AC Power", xaxis_title="Time", yaxis_title="kW", height=450)
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption(
+            "Yellow is what the plant actually produced. Blue is the app's final prediction (physics + AI). The dashed "
+            "gray line is the physics-only estimate with no ML correction -- the gap between blue and gray is what the "
+            "ML correction is contributing."
+        )
 
-    residual = window_df["ACTUAL_AC_POWER(kW)"] - window_df["FINAL_AC_KW"]
-    fig_resid = go.Figure(go.Scatter(x=window_df["DATE_TIME"], y=residual, mode="lines", line=dict(color="#b23b3b")))
-    fig_resid.update_layout(title="Residual (Actual - Predicted)", xaxis_title="Time", yaxis_title="kW", height=350)
-    st.plotly_chart(fig_resid, use_container_width=True)
-    st.caption(
-        "How far off the physics + AI prediction was at each point in time. Values near zero mean an accurate "
-        "prediction; a spike above zero means the plant produced more than predicted, below zero means it "
-        "produced less."
-    )
+    with mu.panel("t2_residual"):
+        residual = window_df["ACTUAL_AC_POWER(kW)"] - window_df["FINAL_AC_KW"]
+        fig_resid = go.Figure(go.Scatter(x=window_df["DATE_TIME"], y=residual, mode="lines", line=dict(color="#b23b3b")))
+        fig_resid.update_layout(title="Residual (Actual - Predicted)", xaxis_title="Time", yaxis_title="kW", height=350)
+        st.plotly_chart(fig_resid, use_container_width=True)
+        st.caption(
+            "How far off the physics + AI prediction was at each point in time. Values near zero mean an accurate "
+            "prediction; a spike above zero means the plant produced more than predicted, below zero means it "
+            "produced less."
+        )

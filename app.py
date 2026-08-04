@@ -38,6 +38,28 @@ st.set_page_config(
     layout='wide',
 )
 
+SOLAR_PANEL_SVG = """
+<svg viewBox="0 0 220 150" width="180" height="123" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Solar panel illustration">
+  <circle cx="196" cy="22" r="13" fill="#FFC94A"/>
+  <g stroke="#FFC94A" stroke-width="2.5" stroke-linecap="round">
+    <line x1="196" y1="2" x2="196" y2="8"/>
+    <line x1="196" y1="36" x2="196" y2="42"/>
+    <line x1="172" y1="22" x2="178" y2="22"/>
+    <line x1="214" y1="22" x2="220" y2="22"/>
+    <line x1="180" y1="6" x2="184" y2="10"/>
+    <line x1="208" y1="34" x2="212" y2="38"/>
+    <line x1="212" y1="6" x2="208" y2="10"/>
+    <line x1="184" y1="34" x2="180" y2="38"/>
+  </g>
+  <g transform="rotate(-6 110 75)">
+    <rect x="20" y="35" width="180" height="80" rx="5" fill="#173F2E"/>
+    <rect x="26.0" y="41.0" width="25.5" height="20.7" rx="1.5" fill="#0F2A1D" stroke="#8CC63F" stroke-width="0.8"/><rect x="54.5" y="41.0" width="25.5" height="20.7" rx="1.5" fill="#0F2A1D" stroke="#8CC63F" stroke-width="0.8"/><rect x="83.0" y="41.0" width="25.5" height="20.7" rx="1.5" fill="#0F2A1D" stroke="#8CC63F" stroke-width="0.8"/><rect x="111.5" y="41.0" width="25.5" height="20.7" rx="1.5" fill="#0F2A1D" stroke="#8CC63F" stroke-width="0.8"/><rect x="140.0" y="41.0" width="25.5" height="20.7" rx="1.5" fill="#0F2A1D" stroke="#8CC63F" stroke-width="0.8"/><rect x="168.5" y="41.0" width="25.5" height="20.7" rx="1.5" fill="#0F2A1D" stroke="#8CC63F" stroke-width="0.8"/><rect x="26.0" y="64.7" width="25.5" height="20.7" rx="1.5" fill="#0F2A1D" stroke="#8CC63F" stroke-width="0.8"/><rect x="54.5" y="64.7" width="25.5" height="20.7" rx="1.5" fill="#0F2A1D" stroke="#8CC63F" stroke-width="0.8"/><rect x="83.0" y="64.7" width="25.5" height="20.7" rx="1.5" fill="#0F2A1D" stroke="#8CC63F" stroke-width="0.8"/><rect x="111.5" y="64.7" width="25.5" height="20.7" rx="1.5" fill="#0F2A1D" stroke="#8CC63F" stroke-width="0.8"/><rect x="140.0" y="64.7" width="25.5" height="20.7" rx="1.5" fill="#0F2A1D" stroke="#8CC63F" stroke-width="0.8"/><rect x="168.5" y="64.7" width="25.5" height="20.7" rx="1.5" fill="#0F2A1D" stroke="#8CC63F" stroke-width="0.8"/><rect x="26.0" y="88.3" width="25.5" height="20.7" rx="1.5" fill="#0F2A1D" stroke="#8CC63F" stroke-width="0.8"/><rect x="54.5" y="88.3" width="25.5" height="20.7" rx="1.5" fill="#0F2A1D" stroke="#8CC63F" stroke-width="0.8"/><rect x="83.0" y="88.3" width="25.5" height="20.7" rx="1.5" fill="#0F2A1D" stroke="#8CC63F" stroke-width="0.8"/><rect x="111.5" y="88.3" width="25.5" height="20.7" rx="1.5" fill="#0F2A1D" stroke="#8CC63F" stroke-width="0.8"/><rect x="140.0" y="88.3" width="25.5" height="20.7" rx="1.5" fill="#0F2A1D" stroke="#8CC63F" stroke-width="0.8"/><rect x="168.5" y="88.3" width="25.5" height="20.7" rx="1.5" fill="#0F2A1D" stroke="#8CC63F" stroke-width="0.8"/>
+    <rect x="105" y="115" width="10" height="24" fill="#173F2E"/>
+    <polygon points="80,139 140,139 150,146 70,146" fill="#0B2416"/>
+  </g>
+</svg>
+"""
+
 st.markdown(
     """
     <style>
@@ -46,9 +68,16 @@ st.markdown(
         border-radius: 12px;
         padding: 28px 32px;
         margin-bottom: 18px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        flex-wrap: wrap;
     }
     .app-banner h1 { color: white; margin: 0; font-size: 2.4rem; }
     .app-banner p { color: #C9E6B8; margin: 6px 0 0 0; font-size: 1rem; }
+    .app-banner-art { flex-shrink: 0; }
+    @media (max-width: 900px) { .app-banner-art { display: none; } }
     .stat-card { border-radius: 10px; padding: 18px 14px; text-align: center; color: white; margin-bottom: 10px; }
     .stat-card .stat-value { font-size: 1.6rem; font-weight: 700; line-height: 1.2; }
     .stat-card .stat-label {
@@ -116,8 +145,11 @@ model = load_model()
 metadata = load_metadata()
 
 st.markdown(
-    '<div class="app-banner"><h1>☀️ Solar Forecast</h1>'
-    '<p>Physics-based solar yield estimates, corrected with a trained ML model.</p></div>',
+    '<div class="app-banner">'
+    '<div><h1>☀️ Solar Forecast</h1>'
+    '<p>Physics-based solar yield estimates, corrected with a trained ML model.</p></div>'
+    f'<div class="app-banner-art">{SOLAR_PANEL_SVG}</div>'
+    '</div>',
     unsafe_allow_html=True,
 )
 
