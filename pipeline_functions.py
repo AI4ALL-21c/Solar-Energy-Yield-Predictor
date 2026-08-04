@@ -5,8 +5,11 @@ Pure functions extracted from Model.ipynb, with no top-level execution code (no 
 
 If we change a function in the notebook, mirror the change here so the tests stay honest about what our pipeline does.
 """
+from datetime import date, timedelta
+
 import numpy as np
 import pandas as pd
+import requests
 
 # Constants (physicsCalc.py)
 STC_IRRADIANCE = 1000
@@ -165,3 +168,127 @@ def derive_capacity_kwp(actual_ac_power_kw, theoretical_ac_per_kwp, threshold=0.
     if mask.sum() == 0:
         raise ValueError("No rows exceed the daytime threshold; cannot derive a stable capacity.")
     return (actual_ac_power_kw[mask] / theoretical_ac_per_kwp[mask]).median()
+
+
+# ---- Weather API integration (Open-Meteo) ----
+GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
+ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+HOURLY_VARS = "temperature_2m,wind_speed_10m,cloud_cover,shortwave_radiation"
+
+MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
+               'July', 'August', 'September', 'October', 'November', 'December']
+
+SEASON_MONTHS = {
+    'Spring (Mar-May)': (3, 5),
+    'Summer (Jun-Aug)': (6, 8),
+    'Fall (Sep-Nov)': (9, 11),
+    'Winter (Dec-Feb)': (12, 2),
+}
+
+
+def geocode_location(location_str):
+    resp = requests.get(GEOCODING_URL, params={'name': location_str, 'count': 1}, timeout=10)
+    resp.raise_for_status()
+    results = resp.json().get('results')
+    if not results:
+        raise ValueError(f"Could not geocode location: {location_str!r}")
+    top = results[0]
+    return top['latitude'], top['longitude'], top.get('timezone', 'auto')
+
+
+def _hourly_json_to_weather_df(payload):
+    hourly = payload['hourly']
+    return pd.DataFrame({
+        'DATE_TIME': pd.to_datetime(hourly['time']),
+        'IRRADIATION(W/m²)': hourly['shortwave_radiation'],
+        'AMBIENT_TEMPERATURE(°C)': hourly['temperature_2m'],
+        'WIND_SPEED(m/s)': hourly['wind_speed_10m'],
+        'CLOUD_COVER(%)': hourly['cloud_cover'],
+    })
+
+
+def fetch_archive(lat, lon, start_date, end_date, timezone='auto'):
+    params = {
+        'latitude': lat, 'longitude': lon, 'start_date': start_date, 'end_date': end_date,
+        'hourly': HOURLY_VARS, 'wind_speed_unit': 'ms', 'timezone': timezone,
+    }
+    resp = requests.get(ARCHIVE_URL, params=params, timeout=30)
+    resp.raise_for_status()
+    return _hourly_json_to_weather_df(resp.json())
+
+
+def _end_of_month(year, month):
+    next_month = month % 12 + 1
+    next_year = year + 1 if next_month == 1 else year
+    return date(next_year, next_month, 1) - timedelta(days=1)
+
+
+def next_month_window(month_number, today=None):
+    """(start, end) for the next upcoming occurrence of the given month (1-12)."""
+    today = today or date.today()
+    year = today.year if month_number > today.month else today.year + 1
+    if month_number == today.month:
+        year = today.year
+    start = date(year, month_number, 1)
+    return start, _end_of_month(year, month_number)
+
+
+def next_season_window(season_label, today=None):
+    """(start, end) for the next upcoming occurrence of a 3-month season."""
+    start_month, end_month = SEASON_MONTHS[season_label]
+    today = today or date.today()
+    year = today.year if start_month >= today.month else today.year + 1
+    start = date(year, start_month, 1)
+    end_year = year + 1 if end_month < start_month else year
+    return start, _end_of_month(end_year, end_month)
+
+
+def historical_windows(start_date, end_date, historical_years=10):
+    """Maps each of the past `historical_years` years to the same calendar (start, end) window."""
+    windows = {}
+    for years_back in range(1, historical_years + 1):
+        try:
+            hist_start = start_date.replace(year=start_date.year - years_back)
+        except ValueError:  # Feb 29 in a non-leap year
+            hist_start = start_date.replace(year=start_date.year - years_back, day=28)
+        try:
+            hist_end = end_date.replace(year=end_date.year - years_back)
+        except ValueError:
+            hist_end = end_date.replace(year=end_date.year - years_back, day=28)
+        windows[hist_start.year] = (hist_start, hist_end)
+    return windows
+
+
+def run_forecast_pipeline(weather_df, capacity_kwp, model, inverter_efficiency=DEFAULT_INVERTER_EFF,
+                           temp_coefficient=DEFAULT_TEMP_COEFF):
+    """Runs the physics baseline + ML gap correction over a weather dataframe, scaled to capacity_kwp.
+
+    Adds MODULE_TEMPERATURE(°C), DC_POWER_KW (physics only), THEORETICAL_AC_KW (physics only),
+    and FINAL_AC_KW (physics + ML correction) columns.
+    """
+    df = build_time_features(weather_df)
+
+    module_temp = np.array([
+        estimate_module_temperature(t, irr, w)
+        for t, irr, w in zip(df['AMBIENT_TEMPERATURE(°C)'], df['IRRADIATION(W/m²)'], df['WIND_SPEED(m/s)'])
+    ])
+    dc_per_kwp = np.array([
+        calculate_dc_power_per_kwp(irr, mt, temp_coefficient)
+        for irr, mt in zip(df['IRRADIATION(W/m²)'], module_temp)
+    ])
+    theoretical_ac_per_kwp = calculate_ac_power_per_kwp(dc_per_kwp, inverter_efficiency)
+
+    combined_ac_per_kwp, predicted_gap = predict_combined_ac_per_kwp(
+        model, df[features], df['IRRADIATION(W/m²)'].values, theoretical_ac_per_kwp
+    )
+
+    df['MODULE_TEMPERATURE(°C)'] = module_temp
+    df['DC_PER_KWP'] = dc_per_kwp
+    df['THEORETICAL_AC_PER_KWP'] = theoretical_ac_per_kwp
+    df['MODEL_GAP_PER_KWP'] = predicted_gap
+    df['COMBINED_AC_PER_KWP'] = combined_ac_per_kwp
+
+    df['DC_POWER_KW'] = dc_per_kwp * capacity_kwp
+    df['THEORETICAL_AC_KW'] = theoretical_ac_per_kwp * capacity_kwp
+    df['FINAL_AC_KW'] = combined_ac_per_kwp * capacity_kwp
+    return df
