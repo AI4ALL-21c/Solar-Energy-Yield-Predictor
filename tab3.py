@@ -50,69 +50,72 @@ def render(model, metadata):
         final_ac_kw = float(combined_kw[0])
         gap = float(gap_arr[0])
 
-    mu.render_stat_cards([
-        ("Theoretical DC Power", f"{float(dc_kw):.2f} kW"),
-        ("Theoretical AC Power", f"{float(ac_kw):.2f} kW"),
-        ("Final AC Power", f"{final_ac_kw:.2f} kW"),
-        ("Module Temperature", f"{float(module_temp):.1f} C"),
-    ])
-    mu.render_stat_cards([("ML Correction Applied", f"{gap:+.4f} per kWp")])
-
-    st.subheader("Recommendations")
-    pct_vs_theo = ((final_ac_kw - float(ac_kw)) / float(ac_kw) * 100) if float(ac_kw) > 0 else 0.0
-    notes = []
-    if irradiation <= 0:
-        notes.append("No irradiation under these conditions -- expected output is zero.")
-    elif abs(pct_vs_theo) < 1:
-        notes.append("Expected output is close to the physics-only estimate.")
-    elif pct_vs_theo < 0:
-        notes.append(f"Expected output is roughly **{abs(pct_vs_theo):.1f}% below** the physics-only estimate.")
-    else:
-        notes.append(f"Expected output is roughly **{pct_vs_theo:.1f}% above** the physics-only estimate.")
-    if float(module_temp) - pu.STC_TEMP > 15:
-        notes.append("High module temperature is reducing expected output.")
-    if use_wind and wind_speed >= 3:
-        notes.append("Wind is helping keep the module cooler.")
-    if cloud_cover >= 50:
-        notes.append("Cloud cover is a major limiting factor here.")
-    if model is None:
-        notes.append("This is physics-only -- the ML correction model was not found.")
-    for n in notes:
-        st.markdown(f"- {n}")
-
-    st.subheader("Charts")
-    vcol1, vcol2 = st.columns(2)
-    with vcol1:
-        fig = go.Figure(data=[
-            go.Bar(name="DC (physics only)", x=["Power"], y=[float(dc_kw)]),
-            go.Bar(name="AC (physics only)", x=["Power"], y=[float(ac_kw)]),
-            go.Bar(name="AC (physics + ML)", x=["Power"], y=[final_ac_kw]),
+    with mu.panel("t3_outputs"):
+        mu.render_stat_cards([
+            ("Theoretical DC Power", f"{float(dc_kw):.2f} kW"),
+            ("Theoretical AC Power", f"{float(ac_kw):.2f} kW"),
+            ("Final AC Power", f"{final_ac_kw:.2f} kW"),
+            ("Module Temperature", f"{float(module_temp):.1f} C"),
         ])
-        fig.update_layout(title="DC vs AC vs Final Prediction", barmode="group", yaxis_title="kW")
-        st.plotly_chart(fig, use_container_width=True)
+        mu.render_stat_cards([("ML Correction Applied", f"{gap:+.4f} per kWp")])
 
-        fig_gauge_temp = go.Figure(go.Indicator(
-            mode="gauge+number", value=float(module_temp), title={"text": "Module Temperature (C)"},
-            gauge={"axis": {"range": [0, 80]}, "bar": {"color": "#B23B3B"}}
-        ))
-        st.plotly_chart(fig_gauge_temp, use_container_width=True)
+    with mu.panel("t3_recommendations"):
+        st.subheader("Recommendations")
+        pct_vs_theo = ((final_ac_kw - float(ac_kw)) / float(ac_kw) * 100) if float(ac_kw) > 0 else 0.0
+        notes = []
+        if irradiation <= 0:
+            notes.append("No irradiation under these conditions -- expected output is zero.")
+        elif abs(pct_vs_theo) < 1:
+            notes.append("Expected output is close to the physics-only estimate.")
+        elif pct_vs_theo < 0:
+            notes.append(f"Expected output is roughly **{abs(pct_vs_theo):.1f}% below** the physics-only estimate.")
+        else:
+            notes.append(f"Expected output is roughly **{pct_vs_theo:.1f}% above** the physics-only estimate.")
+        if float(module_temp) - pu.STC_TEMP > 15:
+            notes.append("High module temperature is reducing expected output.")
+        if use_wind and wind_speed >= 3:
+            notes.append("Wind is helping keep the module cooler.")
+        if cloud_cover >= 50:
+            notes.append("Cloud cover is a major limiting factor here.")
+        if model is None:
+            notes.append("This is physics-only -- the ML correction model was not found.")
+        for n in notes:
+            st.markdown(f"- {n}")
 
-    with vcol2:
-        fig_gauge_irr = go.Figure(go.Indicator(
-            mode="gauge+number", value=irradiation, title={"text": "Irradiation (W/m2)"},
-            gauge={"axis": {"range": [0, 1200]}, "bar": {"color": "#F2A93B"}}
-        ))
-        st.plotly_chart(fig_gauge_irr, use_container_width=True)
+    with mu.panel("t3_charts"):
+        st.subheader("Charts")
+        vcol1, vcol2 = st.columns(2)
+        with vcol1:
+            fig = go.Figure(data=[
+                go.Bar(name="DC (physics only)", x=["Power"], y=[float(dc_kw)]),
+                go.Bar(name="AC (physics only)", x=["Power"], y=[float(ac_kw)]),
+                go.Bar(name="AC (physics + ML)", x=["Power"], y=[final_ac_kw]),
+            ])
+            fig.update_layout(title="DC vs AC vs Final Prediction", barmode="group", yaxis_title="kW")
+            st.plotly_chart(fig, use_container_width=True)
 
-        stc_ratio = irradiation / pu.STC_IRRADIANCE
-        temp_loss = float(dc_per_kwp) - stc_ratio
-        inverter_loss = float(ac_per_kwp) - float(dc_per_kwp)
-        ml_correction = (final_ac_kw / capacity_kwp) - float(ac_per_kwp)
-        fig_waterfall = go.Figure(go.Waterfall(
-            orientation="v",
-            measure=["absolute", "relative", "relative", "relative", "total"],
-            x=["Irradiance ratio", "Temp. effect", "Inverter loss", "ML correction", "Final (per kWp)"],
-            y=[stc_ratio, temp_loss, inverter_loss, ml_correction, 0],
-        ))
-        fig_waterfall.update_layout(title="Loss / Correction Breakdown (per kWp)", showlegend=False)
-        st.plotly_chart(fig_waterfall, use_container_width=True)
+            fig_gauge_temp = go.Figure(go.Indicator(
+                mode="gauge+number", value=float(module_temp), title={"text": "Module Temperature (C)"},
+                gauge={"axis": {"range": [0, 80]}, "bar": {"color": "#B23B3B"}}
+            ))
+            st.plotly_chart(fig_gauge_temp, use_container_width=True)
+
+        with vcol2:
+            fig_gauge_irr = go.Figure(go.Indicator(
+                mode="gauge+number", value=irradiation, title={"text": "Irradiation (W/m2)"},
+                gauge={"axis": {"range": [0, 1200]}, "bar": {"color": "#F2A93B"}}
+            ))
+            st.plotly_chart(fig_gauge_irr, use_container_width=True)
+
+            stc_ratio = irradiation / pu.STC_IRRADIANCE
+            temp_loss = float(dc_per_kwp) - stc_ratio
+            inverter_loss = float(ac_per_kwp) - float(dc_per_kwp)
+            ml_correction = (final_ac_kw / capacity_kwp) - float(ac_per_kwp)
+            fig_waterfall = go.Figure(go.Waterfall(
+                orientation="v",
+                measure=["absolute", "relative", "relative", "relative", "total"],
+                x=["Irradiance ratio", "Temp. effect", "Inverter loss", "ML correction", "Final (per kWp)"],
+                y=[stc_ratio, temp_loss, inverter_loss, ml_correction, 0],
+            ))
+            fig_waterfall.update_layout(title="Loss / Correction Breakdown (per kWp)", showlegend=False)
+            st.plotly_chart(fig_waterfall, use_container_width=True)
