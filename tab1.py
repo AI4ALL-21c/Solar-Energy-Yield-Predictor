@@ -139,18 +139,23 @@ def render(model, metadata):
     daytime_eff = (daylight["FINAL_AC_KW"] / capacity_kwp).mean() * 100 if len(daylight) else 0.0
 
     st.subheader("Expected Outputs")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Avg AC Power (physics + AI)", f"{data['FINAL_AC_KW'].mean():.2f} kW")
-    c2.metric("Avg AC Power (physics only)", f"{data['THEORETICAL_AC_KW'].mean():.2f} kW")
-    c3.metric("Avg DC Power (physics only)", f"{data['THEORETICAL_DC_KW'].mean():.2f} kW")
-    c4.metric("Avg Module Temp", f"{data['MODULE_TEMP'].mean():.1f} C")
-
-    c5, c6, c7 = st.columns(3)
-    c5.metric("Avg Daily Yield", f"{yearly_totals.mean() / num_days:.0f} kWh")
-    c6.metric("Capacity Factor (24h basis)", f"{capacity_factor:.1f}%",
-               help="Average output over all hours including night, divided by rated capacity.")
-    c7.metric("Daytime Efficiency", f"{daytime_eff:.1f}%",
-               help="Average output only during sunlight hours, divided by rated capacity.")
+    mu.render_stat_cards([
+        ("Avg AC Power (physics + AI)", f"{data['FINAL_AC_KW'].mean():.2f} kW"),
+        ("Avg AC Power (physics only)", f"{data['THEORETICAL_AC_KW'].mean():.2f} kW"),
+        ("Avg DC Power (physics only)", f"{data['THEORETICAL_DC_KW'].mean():.2f} kW"),
+        ("Avg Module Temp", f"{data['MODULE_TEMP'].mean():.1f} C"),
+    ])
+    mu.render_stat_cards([
+        ("Avg Daily Yield", f"{yearly_totals.mean() / num_days:.0f} kWh"),
+        (
+            "Capacity Factor (24h basis)", f"{capacity_factor:.1f}%",
+            "Average output over all hours including night, divided by rated capacity.",
+        ),
+        (
+            "Daytime Efficiency", f"{daytime_eff:.1f}%",
+            "Average output only during sunlight hours, divided by rated capacity.",
+        ),
+    ])
 
     fig_compare = go.Figure(data=[
         go.Bar(name="DC (physics only)", x=["Power"], y=[data["THEORETICAL_DC_KW"].mean()]),
@@ -164,12 +169,13 @@ def render(model, metadata):
     st.caption("Built from up to 10 past years of weather for this same calendar window -- "
                "use this to judge how much variation to plan around, not as a record of past output.")
     quantiles = yearly_totals.quantile([0.1, 0.25, 0.5, 0.75, 0.9])
-    q1, q2, q3, q4, q5 = st.columns(5)
-    q1.metric("P10", f"{quantiles[0.1]:.0f} kWh")
-    q2.metric("P25", f"{quantiles[0.25]:.0f} kWh")
-    q3.metric("P50 (Median)", f"{quantiles[0.5]:.0f} kWh")
-    q4.metric("P75", f"{quantiles[0.75]:.0f} kWh")
-    q5.metric("P90", f"{quantiles[0.9]:.0f} kWh")
+    mu.render_stat_cards([
+        ("P10", f"{quantiles[0.1]:.0f} kWh"),
+        ("P25", f"{quantiles[0.25]:.0f} kWh"),
+        ("P50 (Median)", f"{quantiles[0.5]:.0f} kWh"),
+        ("P75", f"{quantiles[0.75]:.0f} kWh"),
+        ("P90", f"{quantiles[0.9]:.0f} kWh"),
+    ])
 
     fig_box = go.Figure(go.Box(y=yearly_totals.values, boxpoints="all", name="Yearly Totals"))
     fig_box.update_layout(title="Spread of Total Energy for This Window (across past years)", yaxis_title="kWh")

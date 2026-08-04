@@ -50,13 +50,13 @@ def render(model, metadata):
         final_ac_kw = float(combined_kw[0])
         gap = float(gap_arr[0])
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Theoretical DC Power", f"{float(dc_kw):.2f} kW")
-    c2.metric("Theoretical AC Power", f"{float(ac_kw):.2f} kW")
-    c3.metric("Final AC Power", f"{final_ac_kw:.2f} kW")
-    c4.metric("Module Temperature", f"{float(module_temp):.1f} C")
-
-    st.metric("ML Correction Applied", f"{gap:+.4f} per kWp")
+    mu.render_stat_cards([
+        ("Theoretical DC Power", f"{float(dc_kw):.2f} kW"),
+        ("Theoretical AC Power", f"{float(ac_kw):.2f} kW"),
+        ("Final AC Power", f"{final_ac_kw:.2f} kW"),
+        ("Module Temperature", f"{float(module_temp):.1f} C"),
+    ])
+    mu.render_stat_cards([("ML Correction Applied", f"{gap:+.4f} per kWp")])
 
     st.subheader("Recommendations")
     pct_vs_theo = ((final_ac_kw - float(ac_kw)) / float(ac_kw) * 100) if float(ac_kw) > 0 else 0.0
