@@ -17,7 +17,7 @@ These are the official metrics for the retrained XGBoost gap model using `solar_
 Run the interactive app with:
 
 ```bash
-streamlit run app.py
+streamlit run solarapp.py
 ```
 
 ```link
