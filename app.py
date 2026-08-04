@@ -28,7 +28,7 @@ from pipeline_functions import (
 )
 
 APP_DIR = pathlib.Path(__file__).parent
-DATA_PATH = APP_DIR / 'solar_plant_data_cleaned.csv'
+DATA_PATH = APP_DIR / 'SOLAR_PLANT_DATA(GENERATION_AND_WEATHER).csv'
 MODEL_PATH = APP_DIR / 'solar_gap_model.joblib'
 METADATA_PATH = APP_DIR / 'solar_gap_model_metadata.json'
 
@@ -37,6 +37,48 @@ st.set_page_config(
     page_icon='☀️',
     layout='wide',
 )
+
+st.markdown(
+    """
+    <style>
+    .app-banner {
+        background: linear-gradient(135deg, #173F2E 0%, #1F5C3F 100%);
+        border-radius: 12px;
+        padding: 28px 32px;
+        margin-bottom: 18px;
+    }
+    .app-banner h1 { color: white; margin: 0; font-size: 2.4rem; }
+    .app-banner p { color: #C9E6B8; margin: 6px 0 0 0; font-size: 1rem; }
+    .stat-card { border-radius: 10px; padding: 18px 14px; text-align: center; color: white; margin-bottom: 10px; }
+    .stat-card .stat-value { font-size: 1.6rem; font-weight: 700; line-height: 1.2; }
+    .stat-card .stat-label {
+        font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em;
+        opacity: 0.9; margin-top: 4px;
+    }
+    .stTabs [data-baseweb="tab"] { font-weight: 600; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+STAT_CARD_COLORS = ['#8CC63F', '#173F2E', '#2C7873', '#4A4A4A']
+
+
+def render_stat_cards(items):
+    """items: list of (label, value) or (label, value, tooltip) tuples, rendered as colored cards."""
+    cols = st.columns(len(items))
+    for i, (col, item) in enumerate(zip(cols, items)):
+        label, value = item[0], item[1]
+        tooltip = item[2] if len(item) > 2 else ''
+        color = STAT_CARD_COLORS[i % len(STAT_CARD_COLORS)]
+        with col:
+            st.markdown(
+                f'<div class="stat-card" style="background:{color};" title="{tooltip}">'
+                f'<div class="stat-value">{value}</div>'
+                f'<div class="stat-label">{label}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
 
 @st.cache_resource
@@ -65,16 +107,19 @@ def load_metadata():
 def load_plant_data(_model) -> pd.DataFrame:
     df = pd.read_csv(DATA_PATH)
     df['DATE_TIME'] = pd.to_datetime(df['DATE_TIME'])
+    # This file's WIND_SPEED(m/s) column is mislabeled and is actually km/h.
+    df['WIND_SPEED(m/s)'] = df['WIND_SPEED(m/s)'] / 3.6
     return run_forecast_pipeline(df, capacity_kwp=PLANT_CAPACITY_KWP, model=_model)
 
 
 model = load_model()
 metadata = load_metadata()
 
-with st.sidebar:
-    st.success('Model loaded.')
-
-st.title('Solar Forecast')
+st.markdown(
+    '<div class="app-banner"><h1>☀️ Solar Forecast</h1>'
+    '<p>Physics-based solar yield estimates, corrected with a trained ML model.</p></div>',
+    unsafe_allow_html=True,
+)
 
 tab_forecast, tab_analyzer, tab_calc, tab_how = st.tabs(
     ['Forecast', 'Plant Performance Analyzer', 'Quick Calculator', 'How It Works']
@@ -162,22 +207,31 @@ with tab_forecast:
                     )
 
                     st.subheader('Expected Outputs')
-                    m1, m2, m3, m4 = st.columns(4)
-                    m1.metric('Avg AC Power (physics + AI)', f'{avg_ac_ai:.2f} kW')
-                    m2.metric('Avg AC Power (physics only)', f'{avg_ac_physics:.2f} kW')
-                    m3.metric('Avg DC Power (physics only)', f'{avg_dc_physics:.2f} kW')
-                    m4.metric('Avg Module Temp', f'{avg_module_temp:.1f} C')
+                    render_stat_cards([
+                        ('Avg AC Power (physics + AI)', f'{avg_ac_ai:.2f} kW'),
+                        ('Avg AC Power (physics only)', f'{avg_ac_physics:.2f} kW'),
+                        ('Avg DC Power (physics only)', f'{avg_dc_physics:.2f} kW'),
+                        ('Avg Module Temp', f'{avg_module_temp:.1f} C'),
+                    ])
+                    render_stat_cards([
+                        ('Avg Daily Yield', f'{avg_daily_yield:,.0f} kWh'),
+                        (
+                            'Capacity Factor (24h basis)', f'{capacity_factor:.1f}%',
+                            'Average AC power (physics + AI), divided by plant capacity, averaged over all 24 hours of the day.',
+                        ),
+                        (
+                            'Daytime Efficiency', f'{daytime_efficiency:.1f}%',
+                            'Average AC power (physics + AI), divided by plant capacity, averaged only over hours with nonzero irradiation.',
+                        ),
+                    ])
 
-                    m5, m6, m7 = st.columns(3)
-                    m5.metric('Avg Daily Yield', f'{avg_daily_yield:,.0f} kWh')
-                    m6.metric(
-                        'Capacity Factor (24h basis)', f'{capacity_factor:.1f}%',
-                        help='Average AC power (physics + AI), divided by plant capacity, averaged over all 24 hours of the day.',
-                    )
-                    m7.metric(
-                        'Daytime Efficiency', f'{daytime_efficiency:.1f}%',
-                        help='Average AC power (physics + AI), divided by plant capacity, averaged only over hours with nonzero irradiation.',
-                    )
+                    st.subheader('Physics vs. AI-Corrected Prediction (avg over window)')
+                    fig_compare = go.Figure()
+                    fig_compare.add_trace(go.Bar(x=['Power'], y=[avg_dc_physics], name='DC (physics only)', marker_color='#8fd3fe'))
+                    fig_compare.add_trace(go.Bar(x=['Power'], y=[avg_ac_physics], name='AC (physics only)', marker_color='#1f6fb4'))
+                    fig_compare.add_trace(go.Bar(x=['Power'], y=[avg_ac_ai], name='AC (physics + AI)', marker_color='#f7a8a8'))
+                    fig_compare.update_layout(yaxis_title='kW', height=450)
+                    st.plotly_chart(fig_compare, width='stretch')
 
                     if len(by_year_results) > 1:
                         st.subheader('Year-to-Year Variability')
@@ -193,7 +247,9 @@ with tab_forecast:
                             combined_all_years.assign(hour=combined_all_years['DATE_TIME'].dt.hour)
                             .groupby('hour')['FINAL_AC_KW'].mean().reset_index().rename(columns={'FINAL_AC_KW': 'avg_kw'})
                         )
-                        fig_day = go.Figure(go.Scatter(x=hourly_shape['hour'], y=hourly_shape['avg_kw'], mode='lines'))
+                        fig_day = go.Figure(go.Scatter(
+                            x=hourly_shape['hour'], y=hourly_shape['avg_kw'], mode='lines', line=dict(color='#173F2E')
+                        ))
                         fig_day.update_layout(
                             title='Typical Day Shape (avg AC power by hour)', xaxis_title='hour', yaxis_title='avg_kw', height=400
                         )
@@ -206,7 +262,7 @@ with tab_forecast:
                             daily['DAY_OFFSET'] = range(1, len(daily) + 1)
                             daily_frames.append(daily)
                         daily_avg = pd.concat(daily_frames, ignore_index=True).groupby('DAY_OFFSET')['FINAL_AC_KW'].mean().reset_index()
-                        fig_daily = go.Figure(go.Bar(x=daily_avg['DAY_OFFSET'], y=daily_avg['FINAL_AC_KW']))
+                        fig_daily = go.Figure(go.Bar(x=daily_avg['DAY_OFFSET'], y=daily_avg['FINAL_AC_KW'], marker_color='#8CC63F'))
                         fig_daily.update_layout(
                             title='Expected Daily Yield Within Window (avg across years)',
                             xaxis_title='DAY_OFFSET', yaxis_title='FINAL_AC_KW', height=400,
@@ -217,8 +273,8 @@ with tab_forecast:
                     avg_irr = combined_all_years['IRRADIATION(W/m²)'].mean()
                     avg_temp = combined_all_years['AMBIENT_TEMPERATURE(°C)'].mean()
                     fig_weather = go.Figure()
-                    fig_weather.add_trace(go.Bar(x=['Irradiation (W/m2)'], y=[avg_irr], name='Irradiation (W/m2)', marker_color='#8fd3fe'))
-                    fig_weather.add_trace(go.Bar(x=['Ambient Temp (C)'], y=[avg_temp], name='Ambient Temp (C)', marker_color='#1f6fb4'))
+                    fig_weather.add_trace(go.Bar(x=['Irradiation (W/m2)'], y=[avg_irr], name='Irradiation (W/m2)', marker_color='#8CC63F'))
+                    fig_weather.add_trace(go.Bar(x=['Ambient Temp (C)'], y=[avg_temp], name='Ambient Temp (C)', marker_color='#173F2E'))
                     fig_weather.update_layout(height=400)
                     st.plotly_chart(fig_weather, width='stretch')
             except requests.exceptions.RequestException as exc:
@@ -251,11 +307,12 @@ with tab_analyzer:
         theo_kwh = window_df['THEORETICAL_AC_KW'].sum() * interval_hours
         mae = (window_df['ACTUAL_AC_POWER(kW)'] - window_df['FINAL_AC_KW']).abs().mean()
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric('Actual Yield', f'{actual_kwh:,.0f} kWh')
-        c2.metric('Predicted Yield (physics + AI)', f'{final_kwh:,.0f} kWh')
-        c3.metric('Predicted Yield (physics only)', f'{theo_kwh:,.0f} kWh')
-        c4.metric('Mean Absolute Error', f'{mae:,.1f} kW')
+        render_stat_cards([
+            ('Actual Yield', f'{actual_kwh:,.0f} kWh'),
+            ('Predicted Yield (physics + AI)', f'{final_kwh:,.0f} kWh'),
+            ('Predicted Yield (physics only)', f'{theo_kwh:,.0f} kWh'),
+            ('Mean Absolute Error', f'{mae:,.1f} kW'),
+        ])
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=window_df['DATE_TIME'], y=window_df['ACTUAL_AC_POWER(kW)'], name='Actual', line=dict(color='#f2c14e')))
@@ -402,15 +459,16 @@ with tab_how:
         {'feature': FEATURE_COLUMNS, 'importance': model.feature_importances_}
     ).sort_values('importance')
     fig_importance = go.Figure(go.Bar(
-        x=importance_df['importance'], y=importance_df['feature'], orientation='h', marker_color='#6fb1f0'
+        x=importance_df['importance'], y=importance_df['feature'], orientation='h', marker_color='#2C7873'
     ))
     fig_importance.update_layout(xaxis_title='importance', yaxis_title='feature', height=450)
     st.plotly_chart(fig_importance, width='stretch')
 
-    perf1, perf2, perf3 = st.columns(3)
-    perf1.metric('Backtest RMSE (kW)', f"{metadata['backtest_rmse_kw']:.1f}")
-    perf2.metric('Backtest MAE (kW)', f"{metadata['backtest_mae_kw']:.1f}")
-    perf3.metric('Backtest R2', f"{metadata['backtest_r2_kw']:.3f}")
+    render_stat_cards([
+        ('Backtest RMSE (kW)', f"{metadata['backtest_rmse_kw']:.1f}"),
+        ('Backtest MAE (kW)', f"{metadata['backtest_mae_kw']:.1f}"),
+        ('Backtest R2', f"{metadata['backtest_r2_kw']:.3f}"),
+    ])
 
     with st.expander('Full metadata'):
         st.json(metadata)

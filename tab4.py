@@ -59,10 +59,11 @@ def render(model, metadata):
         st.info("Feature importance needs the trained model file.")
 
     if metadata:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Backtest RMSE (kW)", f"{metadata.get('backtest_rmse_kw', float('nan')):.1f}")
-        c2.metric("Backtest MAE (kW)", f"{metadata.get('backtest_mae_kw', float('nan')):.1f}")
-        c3.metric("Backtest R2", f"{metadata.get('backtest_r2_kw', float('nan')):.3f}")
+        mu.render_stat_cards([
+            ("Backtest RMSE (kW)", f"{metadata.get('backtest_rmse_kw', float('nan')):.1f}"),
+            ("Backtest MAE (kW)", f"{metadata.get('backtest_mae_kw', float('nan')):.1f}"),
+            ("Backtest R2", f"{metadata.get('backtest_r2_kw', float('nan')):.3f}"),
+        ])
         n_train = metadata.get("n_train")
         n_test = metadata.get("n_test")
         if n_train and n_test:
