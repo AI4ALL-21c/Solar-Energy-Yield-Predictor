@@ -480,4 +480,3 @@ with tab_how:
         '- Missing input values reduce accuracy (e.g. no wind data uses the NOCT fallback).\n'
         '- Trained on a limited historical window from one plant/region.\n'
     )
-
