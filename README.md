@@ -24,6 +24,51 @@ A physics-informed machine learning pipeline that forecasts solar power output f
 
 ---
 
+---
+
+## 📂 Interactive Project Directory Matrix
+*Use this grid to instantly jump into specific project phases, code scripts, notebooks, or visual layouts.*
+
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <h3>📊 Phase 1: Data & EDA</h3>
+      <ul>
+        <li><a href="SolarPlantData.ipynb">Data Cleaning Notebook</a></li>
+        <li><a href="Visualization.ipynb">UI Plot Prototyping</a></li>
+        <li><a href="SOLAR_PLANT_DATA(GENERATION_AND_WEATHER).csv">Raw Plant Dataset (CSV)</a></li>
+        <li><a href="cyclical_hour_unit_circle_sketch.png">Hour Scaling Design</a></li>
+        <li><a href="cyclical_month_unit_circle_sketch.png">Month Scaling Design</a></li>
+        <li><a href="temperature_vs_dc_efficiency.png">DC Efficiency Plot</a></li>
+      </ul>
+    </td>
+    <td width="33%" valign="top">
+      <h3>🧠 Phase 2: Core Models</h3>
+      <ul>
+        <li><a href="Model.ipynb">XGBoost Worksheets</a></li>
+        <li><a href="physicsCalc.py">Physics Engine Code</a></li>
+        <li><a href="pipeline_functions.py">Data Pipeline Streams</a></li>
+        <li><a href="physicsutil.py">Math & Geometry Helpers</a></li>
+        <li><a href="Model_Cells_Explanations.pdf">Deep-Dive Manual (PDF)</a></li>
+        <li><a href="solar_gap_model.joblib">Model Weights Artifact</a></li>
+      </ul>
+    </td>
+    <td width="33%" valign="top">
+      <h3>🖥️ Phase 3: Web App</h3>
+      <ul>
+        <li><a href="app.py">Main App Launchpad</a></li>
+        <li><a href="solarapp.py">Alternative Interface UI</a></li>
+        <li><a href="weatherapi.py">Weather API Core</a></li>
+        <li><a href="constants.py">Aesthetic Configs</a></li>
+        <li><a href="tab1.py">Tab 1</a> | <a href="tab2.py">Tab 2</a></li>
+        <li><a href="tab3.py">Tab 3</a> | <a href="tab4.py">Tab 4</a></li>
+      </ul>
+    </td>
+  </tr>
+</table>
+
+---
+
 ## Overview
 
 Solar output is clean but volatile — clouds, wind, and temperature all shift generation minute to minute, and grid operators need advance notice of expected output to plan reserves. This project predicts real AC power output from a solar plant by combining a physics model (module temperature and theoretical AC power from irradiance) with an XGBoost model trained to correct the gap between that physics estimate and what the plant actually produced.
