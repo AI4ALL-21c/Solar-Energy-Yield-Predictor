@@ -224,8 +224,8 @@ Solar-Energy-Yield-Predictor/
     <td width="33%" valign="top">
       <h3>🖥️ Phase 3: Web App</h3>
       <ul>
-        <li><a href="app.py">Main App Launchpad</a></li>
-        <li><a href="solarapp.py">Alternative Interface UI</a></li>
+        <li><a href="solarapp.py">Main App Launchpad</a></li>
+        <li><a href="modelutil.py">Model & UI Helpers</a></li>
         <li><a href="weatherapi.py">Weather API Core</a></li>
         <li><a href="constants.py">Aesthetic Configs</a></li>
         <li><a href="tab1.py">Tab 1</a> | <a href="tab2.py">Tab 2</a></li>
