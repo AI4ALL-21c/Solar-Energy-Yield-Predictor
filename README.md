@@ -4,6 +4,9 @@
 ![XGBoost](https://img.shields.io/badge/model-XGBoost-orange)
 ![Streamlit](https://img.shields.io/badge/app-Streamlit-red)
 ![License](https://img.shields.io/badge/license-MIT-green)
+[![GitHub Repo](https://img.shields.io/badge/GitHub-Repository-181717?logo=github)](https://github.com/AI4ALL-21c/Solar-Energy-Yield-Predictor)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://solar-energy-yield-predictor-b2somffs8gmotjcdksczlr.streamlit.app/)
+[![Symposium Poster](https://img.shields.io/badge/Symposium-Poster-4285F4?logo=googleslides&logoColor=white)](https://docs.google.com/presentation/d/1baY5rqTX8iJcfrwPp6jsbLJn0c0sqKGwQt-gFXXY_yY/edit?usp=sharing)
 
 A physics-informed machine learning pipeline that forecasts solar power output from weather data, built to support grid stability decisions.
 
@@ -21,8 +24,6 @@ A physics-informed machine learning pipeline that forecasts solar power output f
 - [Getting Started](#getting-started)
 - [Project Structure](#project-structure)
 - [Documentation & Citations](#documentation--citations)
-
----
 
 ---
 
@@ -75,6 +76,12 @@ Solar output is clean but volatile — clouds, wind, and temperature all shift g
 
 The project was built in three phases over the program: data ingestion and cleaning (fixing unit mismatches, filling time gaps, merging 22 inverters into one plant-level total), physics-based feature engineering, and a unified, reproducible notebook pipeline that ties both together into one final prediction.
 
+<p align="center">
+  <img src="temperature_vs_dc_efficiency.png" alt="Scatter plot of module temperature vs. DC efficiency showing a positive, noisy relationship" width="600">
+  <br>
+  <em>Module temperature vs. DC efficiency from the cleaned plant dataset (Phase 1 EDA) — the physical relationship the physics baseline is built on, and the noise XGBoost is trained to correct for.</em>
+</p>
+
 ## Algorithm
 
 | | |
@@ -93,6 +100,12 @@ The project was built in three phases over the program: data ingestion and clean
 | `TIME_OF_DAY_SIN/COS` | Time-of-day, cyclically encoded |
 | `DAY_OF_YEAR_SIN/COS` | Day-of-year, cyclically encoded |
 
+<p align="center">
+  <img src="cyclical_hour_unit_circle_sketch.png" alt="Hour-of-day mapped onto a unit circle for cyclical encoding" width="420">
+  <br>
+  <em>Time-of-day (and day-of-year, the same way) is mapped onto a unit circle via sin/cos so the model sees hour 23 and hour 0 as neighbors instead of 23 apart.</em>
+</p>
+
 **Why XGBoost:** compared against two baselines on the same features, XGBoost had the highest R² by a wide margin and captured nonlinear weather-to-yield relationships the simpler models couldn't.
 
 | Model | R² |
@@ -107,26 +120,26 @@ Official metrics for the retrained XGBoost gap model using `solar_plant_data_cle
 
 | Evaluation | RMSE | MAE | R² |
 |---|---:|---:|---:|
-| 80/20 Holdout | 0.0488 gap/kWp | 0.0177 gap/kWp | 0.7910 |
-| 5-Fold Cross-Validation | 0.0466 ± 0.0014 gap/kWp | — | — |
-| AC Power Backtest | 1245.20 kW | 431.84 kW | 0.9607 |
+| 80/20 Holdout | 0.0573 gap/kWp | 0.0235 gap/kWp | 0.7638 |
+| 5-Fold Cross-Validation | 0.0657 ± 0.0050 gap/kWp | — | — |
+| AC Power Backtest | 1185.46 kW | 463.61 kW | 0.9645 |
 
-> **What these numbers mean:** on the AC power backtest, the model explains about 96% of the real variance in plant output (R² ≈ 0.96), and a typical prediction is off by roughly 432 kW (MAE) — small relative to the plant's ~25 MW capacity. RMSE is higher than MAE because it penalizes large misses more heavily, such as sudden overcast swings the physics-only baseline can't anticipate. The 5-fold cross-validation result stays consistent across folds, indicating the model isn't overfitting to one slice of the data.
+> **What these numbers mean:** on the AC power backtest, the model explains about 96% of the real variance in plant output (R² ≈ 0.965), and a typical prediction is off by roughly 464 kW (MAE) — about 2% of the plant's 20.7 MWp capacity. RMSE is higher than MAE because it penalizes large misses more heavily, such as sudden overcast swings the physics-only baseline can't anticipate. The 5-fold cross-validation result stays consistent across folds, indicating the model isn't overfitting to one slice of the data.
 
 Feature importances pulled directly from the trained model:
 
 | Feature | Importance |
 |---|---:|
-| Irradiation | 34% |
-| Day of year (sin) | 15% |
-| Day of year (cos) | 14% |
-| Time of day (cos) | 11% |
-| Cloud cover | 7% |
-| Ambient temperature | 7% |
-| Time of day (sin) | 7% |
-| Wind speed | 6% |
+| Irradiation | 26.5% |
+| Day of year (sin) | 17.9% |
+| Day of year (cos) | 13.5% |
+| Time of day (cos) | 10.0% |
+| Ambient temperature | 8.4% |
+| Cloud cover | 8.1% |
+| Time of day (sin) | 7.9% |
+| Wind speed | 7.6% |
 
-Irradiation dominates, as expected. But the seasonal and time-of-day cyclical features rank ahead of cloud cover, temperature, and wind — the model isn't just reacting to instantaneous weather, it's also learned slower seasonal effects (like panel soiling) that pure physics doesn't capture.
+Irradiation dominates, as expected, but three of the four cyclical time features — day-of-year (sin/cos) and time-of-day (cos) — outrank cloud cover, ambient temperature, and wind speed. The model isn't just reacting to instantaneous weather; it has also learned slower seasonal effects (like panel soiling) that pure physics doesn't capture.
 
 ## Impact and Bias
 
@@ -219,6 +232,10 @@ Solar-Energy-Yield-Predictor/
 
 ## Documentation & Citations
 
+**Repository:** [github.com/AI4ALL-21c/Solar-Energy-Yield-Predictor](https://github.com/AI4ALL-21c/Solar-Energy-Yield-Predictor) — full code, notebooks, and documentation.
+
+**Symposium poster:** [Google Slides](https://docs.google.com/presentation/d/1baY5rqTX8iJcfrwPp6jsbLJn0c0sqKGwQt-gFXXY_yY/edit?usp=sharing)
+
 **Data sources**
 
 | Source | Link |
@@ -236,15 +253,5 @@ Solar-Energy-Yield-Predictor/
 5. IEEE Xplore (2022). Grid integration challenges and solution strategies for solar PV systems: a review. [ieeexplore.ieee.org/document/9773105](https://ieeexplore.ieee.org/document/9773105/)
 6. Pombo, D. V., et al. (2022). Increasing the accuracy of hourly multi-output solar power forecast with physics-informed machine learning. *Sensors, 22*(3), 749. [pmc.ncbi.nlm.nih.gov/articles/PMC8839153](https://pmc.ncbi.nlm.nih.gov/articles/PMC8839153/)
 7. de Oliveira Santos, L., et al. (2024). Photovoltaic power estimation and forecast models integrating physics and machine learning: a review. *Solar Energy, 284.* [sciencedirect.com/science/article/pii/S0038092X24007394](https://www.sciencedirect.com/science/article/pii/S0038092X24007394)
-
----
-
-## Final Presentation Polish Plan
-
-- [ ] Confirm the app runs cleanly in the target environment
-- [ ] Add sample input presets for sunny, cloudy, and low-light cases
-- [ ] Save a serialized model artifact to speed startup
-- [ ] Improve layout spacing and labels in the Streamlit UI
-- [ ] Capture screenshots and prepare a short demo script
 
 ---
