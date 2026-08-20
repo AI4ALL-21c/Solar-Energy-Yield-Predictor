@@ -23,50 +23,8 @@ A physics-informed machine learning pipeline that forecasts solar power output f
 - [Streamlit App](#streamlit-app)
 - [Getting Started](#getting-started)
 - [Project Structure](#project-structure)
+- [Project Directory Matrix](#-interactive-project-directory-matrix)
 - [Documentation & Citations](#documentation--citations)
-
----
-
-## 📂 Interactive Project Directory Matrix
-*Use this grid to instantly jump into specific project phases, code scripts, notebooks, or visual layouts.*
-
-<table>
-  <tr>
-    <td width="33%" valign="top">
-      <h3>📊 Phase 1: Data & EDA</h3>
-      <ul>
-        <li><a href="SolarPlantData.ipynb">Data Cleaning Notebook</a></li>
-        <li><a href="Visualization.ipynb">UI Plot Prototyping</a></li>
-        <li><a href="SOLAR_PLANT_DATA(GENERATION_AND_WEATHER).csv">Raw Plant Dataset (CSV)</a></li>
-        <li><a href="cyclical_hour_unit_circle_sketch.png">Hour Scaling Design</a></li>
-        <li><a href="cyclical_month_unit_circle_sketch.png">Month Scaling Design</a></li>
-        <li><a href="temperature_vs_dc_efficiency.png">DC Efficiency Plot</a></li>
-      </ul>
-    </td>
-    <td width="33%" valign="top">
-      <h3>🧠 Phase 2: Core Models</h3>
-      <ul>
-        <li><a href="Model.ipynb">XGBoost Worksheets</a></li>
-        <li><a href="physicsCalc.py">Physics Engine Code</a></li>
-        <li><a href="pipeline_functions.py">Data Pipeline Streams</a></li>
-        <li><a href="physicsutil.py">Math & Geometry Helpers</a></li>
-        <li><a href="Model_Cells_Explanations.pdf">Deep-Dive Manual (PDF)</a></li>
-        <li><a href="solar_gap_model.joblib">Model Weights Artifact</a></li>
-      </ul>
-    </td>
-    <td width="33%" valign="top">
-      <h3>🖥️ Phase 3: Web App</h3>
-      <ul>
-        <li><a href="app.py">Main App Launchpad</a></li>
-        <li><a href="solarapp.py">Alternative Interface UI</a></li>
-        <li><a href="weatherapi.py">Weather API Core</a></li>
-        <li><a href="constants.py">Aesthetic Configs</a></li>
-        <li><a href="tab1.py">Tab 1</a> | <a href="tab2.py">Tab 2</a></li>
-        <li><a href="tab3.py">Tab 3</a> | <a href="tab4.py">Tab 4</a></li>
-      </ul>
-    </td>
-  </tr>
-</table>
 
 ---
 
@@ -112,11 +70,13 @@ The project was built in three phases over the program: data ingestion and clean
 |---|---:|
 | Linear Regression | 0.696 |
 | Random Forest | 0.795 |
-| **XGBoost (final model)** | **0.963** |
+| **XGBoost** | **0.964** |
+
+*Baseline comparison from the model-selection pass (AC power R², single train/test split). See Model Evaluation below for the final retrained model's official metrics.*
 
 ## Model Evaluation
 
-Official metrics for the retrained XGBoost gap model using `solar_plant_data_cleaned.csv`:
+Official metrics for the retrained XGBoost gap model, trained on `solar_plant_data_cleaned.csv` (3,232 rows after cleaning):
 
 | Evaluation | RMSE | MAE | R² |
 |---|---:|---:|---:|
@@ -127,6 +87,10 @@ Official metrics for the retrained XGBoost gap model using `solar_plant_data_cle
 > **What these numbers mean:** on the AC power backtest, the model explains about 96% of the real variance in plant output (R² ≈ 0.965), and a typical prediction is off by roughly 464 kW (MAE) — about 2% of the plant's 20.7 MWp capacity. RMSE is higher than MAE because it penalizes large misses more heavily, such as sudden overcast swings the physics-only baseline can't anticipate. The 5-fold cross-validation result stays consistent across folds, indicating the model isn't overfitting to one slice of the data.
 
 Feature importances pulled directly from the trained model:
+
+<p align="center">
+  <img src="feature_importance.png" alt="Horizontal bar chart of XGBoost feature importances, led by irradiation at 26.5%" width="600">
+</p>
 
 | Feature | Importance |
 |---|---:|
@@ -229,6 +193,47 @@ Solar-Energy-Yield-Predictor/
 ├── deployment_notes.md          # Monitoring/maintenance plan
 └── requirements.txt
 ```
+
+## 📂 Interactive Project Directory Matrix
+*Use this grid to instantly jump into specific project phases, code scripts, notebooks, or visual layouts.*
+
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <h3>📊 Phase 1: Data & EDA</h3>
+      <ul>
+        <li><a href="SolarPlantData.ipynb">Data Cleaning Notebook</a></li>
+        <li><a href="Visualization.ipynb">UI Plot Prototyping</a></li>
+        <li><a href="SOLAR_PLANT_DATA(GENERATION_AND_WEATHER).csv">Raw Plant Dataset (CSV)</a></li>
+        <li><a href="cyclical_hour_unit_circle_sketch.png">Hour Scaling Design</a></li>
+        <li><a href="cyclical_month_unit_circle_sketch.png">Month Scaling Design</a></li>
+        <li><a href="temperature_vs_dc_efficiency.png">DC Efficiency Plot</a></li>
+      </ul>
+    </td>
+    <td width="33%" valign="top">
+      <h3>🧠 Phase 2: Core Models</h3>
+      <ul>
+        <li><a href="Model.ipynb">XGBoost Worksheets</a></li>
+        <li><a href="physicsCalc.py">Physics Engine Code</a></li>
+        <li><a href="pipeline_functions.py">Data Pipeline Streams</a></li>
+        <li><a href="physicsutil.py">Math & Geometry Helpers</a></li>
+        <li><a href="Model_Cells_Explanations.pdf">Deep-Dive Manual (PDF)</a></li>
+        <li><a href="solar_gap_model.joblib">Model Weights Artifact</a></li>
+      </ul>
+    </td>
+    <td width="33%" valign="top">
+      <h3>🖥️ Phase 3: Web App</h3>
+      <ul>
+        <li><a href="app.py">Main App Launchpad</a></li>
+        <li><a href="solarapp.py">Alternative Interface UI</a></li>
+        <li><a href="weatherapi.py">Weather API Core</a></li>
+        <li><a href="constants.py">Aesthetic Configs</a></li>
+        <li><a href="tab1.py">Tab 1</a> | <a href="tab2.py">Tab 2</a></li>
+        <li><a href="tab3.py">Tab 3</a> | <a href="tab4.py">Tab 4</a></li>
+      </ul>
+    </td>
+  </tr>
+</table>
 
 ## Documentation & Citations
 
